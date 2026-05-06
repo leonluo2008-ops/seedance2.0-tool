@@ -5,7 +5,7 @@ description: "调用 Volcengine Seedance 2.0 模型生成视频的 OpenClaw Skil
 
 # Seedance 2.0 Tool Skill
 
-调用 Volcengine Seedance 2.0 API 生成视频。支持图片参考、视频参考、文生视频、角色替换等多种场景。
+调用 Volcengine Seedance 2.0 API 生成视频。支持图片参考、视频参考、文生视频、动作模仿、角色替换等多种场景。
 
 ## 环境准备
 
@@ -51,13 +51,13 @@ python3 seedance.py create \
   --wait
 ```
 
-### 3. 角色替换（图片参考 + 视频参考）⭐ 最常用
+### 3. 动作模仿（图片参考 + 视频参考）⭐ 最常用
 
 ```bash
 python3 seedance.py create \
   --ref-images ./character.png \
   --video-refs ./motion.mp4 \
-  --prompt "使用图片1的角色，替换视频1中的角色，纯白色背景，表情自然流畅" \
+  --prompt "@角色图模仿@动作视频的动作，纯白背景，画幅1:1" \
   --duration 5 \
   --ratio 1:1 \
   --wait \
@@ -93,8 +93,8 @@ python3 seedance.py create \
 | `--prompt` | `-p` | 文字提示词，描述视频内容 | `"宇航员在太空行走"` |
 | `--image` | `-i` | 首帧图片（URL 或本地路径） | `./hero.png` |
 | `--last-frame` | - | 尾帧图片（URL 或本地路径） | `./end.png` |
-| `--ref-images` | - | 参考图片列表（角色参考，role=reference_image） | `./char.png` |
-| `--video-ref` | - | 参考视频（本地路径自动上传 Chevereto） | `./motion.mp4` |
+| `--ref-images` | （无） | 参考图片列表（角色参考，role=reference_image） | `./char.png` |
+| `--video-refs` | （无） | 参考视频（本地路径自动上传 Chevereto，支持多个） | `./motion.mp4` |
 | `--audio` | - | 参考音频（URL 或本地路径） | `./bgm.mp3` |
 | `--draft-task-id` | - | 草稿任务 ID（从草稿生成正式视频） | `task_xxx` |
 
@@ -325,11 +325,15 @@ and action choreography, BGM references @Audio1, scene references @Image2
 | 忽略音频设计 | 音效设计大幅提升质量 |
 | 忘记匹配时长和复杂度 | 提示词复杂度要和生成时长匹配 |
 
-### 提示词示例：角色替换
+### 提示词示例：动作模仿
 
 ```
-@Image1's character as the subject, reference @Video1's camera movement
-and action choreography, pure white background, natural and smooth expressions
+@角色图模仿@动作视频的动作，纯白背景，画幅1:1
+```
+
+英文版：
+```
+@Image1 mimics @Video1's motion, pure white background, 1:1 aspect ratio
 ```
 
 ### 提示词示例：产品展示
