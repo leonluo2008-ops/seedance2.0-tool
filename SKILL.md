@@ -7,6 +7,26 @@ description: "调用 Volcengine Seedance 2.0 模型生成视频的 OpenClaw Skil
 
 调用 Volcengine Seedance 2.0 API 生成视频。支持图片参考、视频参考、文生视频、动作模仿、角色替换等多种场景。
 
+## 交付规范 ⭐（每次生成后必须执行）
+
+> 视频生成完成后，必须按以下顺序操作：
+
+1. **下载视频**：通过 `--download` 或手动 curl 下载到本地
+2. **发送到飞书聊天框**：使用 `message` 工具，channel=feishu，media 指向本地视频路径，caption 写清楚 prompt 和素材信息
+3. **记录任务 ID**：告知用户任务 ID 供追溯
+
+```python
+# 示例：发送视频到当前飞书群
+message(
+    action="send",
+    channel="feishu",
+    media="/tmp/openclaw/output/生成视频.mp4",
+    caption="动作模仿测试：@Image1's character mimics @Video1's action choreography"
+)
+```
+
+> ⚠️ 禁止只发文字描述或链接，必须发实际视频文件。
+
 ## 环境准备
 
 ### 必填环境变量
