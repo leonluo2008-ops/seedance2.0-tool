@@ -101,7 +101,7 @@ class CheveretoUploader(Uploader):
         
         try:
             with open(p, "rb") as f:
-                files = {"source": (p.name, f, self._guess_mime(p))}
+                files = {"source": (p.name, f, self._guess_mime(p, media_type))}
                 data = {"key": self.api_key}
                 resp = requests.post(
                     f"{self.host}/api/1/upload",
@@ -122,7 +122,7 @@ class CheveretoUploader(Uploader):
             print(f"\nError: Chevereto upload failed: {e}", file=sys.stderr)
             sys.exit(1)
     
-    def _guess_mime(self, p: Path) -> str:
+    def _guess_mime(self, p: Path, media_type: str) -> str:
         mime, _ = mimetypes.guess_type(str(p))
         return mime or f"{media_type}/octet-stream"
 
@@ -267,7 +267,7 @@ def api_request(method: str, url: str, data: dict = None, timeout: int = 120) ->
 
 def wait_for_completion(task_id: str, poll_interval: int = 15, timeout: int = 600) -> dict:
     """轮询等待任务完成"""
-    base_url = "https://ark.cn-beijing.volces.com/api/v3/bots/bot-..."  # placeholder
+    base_url = "https://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks"
     
     start = time.time()
     while time.time() - start < timeout:
@@ -387,7 +387,7 @@ def cmd_create(args):
     }
     
     # 发送请求
-    base_url = "https://ark.cn-beijing.volces.com/api/v3/bots/bot-..."  # placeholder
+    base_url = "https://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks"
     print(f"Creating task with model {args.model}...")
     result = api_request("POST", f"{base_url}/tasks", body)
     
@@ -419,8 +419,8 @@ def cmd_create(args):
 
 def cmd_status(args):
     """查询任务状态"""
-    base_url = "https://ark.cn-beijing.volces.com/api/v3/bots/bot-..."
-    result = api_request("GET", f"{base_url}/tasks/{args.task_id}")
+    base_url = "https://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks"
+    result = api_request("GET", f"{base_url}/{args.task_id}")
     print(json.dumps(result, indent=2, ensure_ascii=False))
 
 
