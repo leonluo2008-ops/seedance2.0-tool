@@ -327,11 +327,13 @@ and action choreography, BGM references @Audio1, scene references @Image2
 
 ### 提示词示例：动作模仿
 
+中文（示例 #3 等效提示词）：
 ```
 @角色图模仿@动作视频的动作，纯白背景，画幅1:1
 ```
+> 说明：`@角色图` 和 `@动作视频` 按 `--ref-images` 和 `--video-refs` 传入顺序映射，无需与英文序号对应。
 
-英文版：
+英文等价：
 ```
 @Image1 mimics @Video1's motion, pure white background, 1:1 aspect ratio
 ```
