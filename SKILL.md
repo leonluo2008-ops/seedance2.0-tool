@@ -56,7 +56,7 @@ python3 seedance.py create \
 ```bash
 python3 seedance.py create \
   --ref-images ./character.png \
-  --video-ref ./motion.mp4 \
+  --video-refs ./motion.mp4 \
   --prompt "使用图片1的角色，替换视频1中的角色，纯白色背景，表情自然流畅" \
   --duration 5 \
   --ratio 1:1 \
@@ -69,7 +69,7 @@ python3 seedance.py create \
 ```bash
 python3 seedance.py create \
   --image ./scene.jpg \
-  --video-ref ./ref.mp4 \
+  --video-refs ./ref.mp4 \
   --prompt "动作复刻，保持场景一致性" \
   --wait
 ```
@@ -210,6 +210,136 @@ subprocess.run([
     "-F", f"source=@{path};type={mime_type}",
     "-F", f"key={api_key}",
 ], capture_output=True)
+```
+
+## 提示词编写指南（@ 参考系统）
+
+Seedance 2.0 使用 `@` 符号为每个素材分配角色，这是最核心的提示词技巧。
+
+### 输入限制
+
+| 类型 | 数量上限 | 格式 | 单文件大小 |
+|------|---------|------|-----------|
+| 图片 | ≤9 | jpeg, png, webp, bmp, tiff, gif | ≤30MB |
+| 视频 | ≤3 | mp4, mov | ≤50MB，总时长 2-15s |
+| 音频 | ≤3 | mp3, wav | ≤15MB，总时长 ≤15s |
+| **合计** | **≤12** | — | — |
+
+> ⚠️ 禁止上传真实人脸图片（平台合规限制）
+
+### @ 参考系统语法
+
+```plaintext
+@Image1 @Image2 @Image3 ...
+@Video1 @Video2 @Video3
+@Audio1 @Audio2 @Audio3
+```
+
+每个素材必须明确声明用途：
+
+| 用途 | 示例语法 |
+|------|---------|
+| 首帧 | `@Image1 as the first frame` |
+| 尾帧 | `@Image2 as the last frame` |
+| 角色外观 | `@Image1's character as the subject` |
+| 场景背景 | `scene references @Image3` |
+| 镜头运动 | `reference @Video1's camera movement` |
+| 动作编排 | `reference @Video1's action choreography` |
+| 视觉效果 | `completely reference @Video1's effects and transitions` |
+| 节奏/韵律 | `video rhythm references @Video1` |
+| 背景音乐 | `BGM references @Audio1` |
+| 音效 | `sound effects reference @Video3's audio` |
+
+**组合示例：**
+```
+@Image1's character as the subject, reference @Video1's camera movement
+and action choreography, BGM references @Audio1, scene references @Image2
+```
+
+### 标准提示词结构
+
+```
+[主体/角色设定] + [场景/环境] + [动作/运动描述] + [镜头运动] +
+[时间分段] + [转场/特效] + [音频/音效] + [风格/氛围]
+```
+
+### 时间分段提示词（视频 > 8s）
+
+```plaintext
+0–3s:  [开场场景描述，镜头，动作]
+3–6s:  [中间发展]
+6–10s: [高潮或关键动作]
+10–15s:[结局，结尾镜头]
+```
+
+### 镜头术语表
+
+| 术语 | 说明 |
+|------|------|
+| Push in / Slow push | 镜头推向主体 |
+| Pull back | 镜头拉远主体 |
+| Pan left/right | 水平摇镜 |
+| Tilt up/down | 垂直摇镜 |
+| Track / Follow shot | 跟踪拍摄 |
+| Orbit / Revolve | 环绕拍摄 |
+| One-take / Oner | 单镜连续拍摄 |
+| Hitchcock zoom | 移动变焦（推+拉同时） |
+| Fisheye lens | 鱼眼镜头 |
+| Low angle / High angle | 低角度/高角度 |
+| Bird's eye | 俯视镜头 |
+| First-person POV | 主观镜头 |
+| Whip pan | 快速摇镜 |
+| Crane shot | 升降镜头 |
+
+| 景别 | 说明 |
+|------|------|
+| Extreme close-up | 特写（眼睛、嘴巴等细节） |
+| Close-up | 脸部特写 |
+| Medium close-up | 头部+肩部 |
+| Medium shot | 腰部以上 |
+| Full shot | 全身 |
+| Wide / Establishing shot | 环境全景 |
+
+### 质量增强词（可附加在提示词末尾）
+
+```plaintext
+- Cinematic quality, film grain, shallow depth of field
+- 2.35:1 widescreen, 24fps
+- Anime style / Photorealistic
+- High saturation neon colors, cool-warm contrast
+- Tense and suspenseful / Warm and healing / Epic and grand
+- Comedy with exaggerated expressions
+- Background music: grand and majestic
+- Sound effects: footsteps, crowd noise, car sounds
+- Beat-synced transitions matching music rhythm
+```
+
+### 常见错误
+
+| 错误 | 正确做法 |
+|------|---------|
+| 只说 `reference @Video1` 不说参考什么 | 明确说 `reference @Video1's camera movement` |
+| 同时要求固定镜头+环绕镜头 | 同一片段只选一种 |
+| 5秒塞太多场景 | 确保物理上可行 |
+| 上传5张图但没给每张分配角色 | 每个 @reference 都要有明确用途 |
+| 忽略音频设计 | 音效设计大幅提升质量 |
+| 忘记匹配时长和复杂度 | 提示词复杂度要和生成时长匹配 |
+
+### 提示词示例：角色替换
+
+```
+@Image1's character as the subject, reference @Video1's camera movement
+and action choreography, pure white background, natural and smooth expressions
+```
+
+### 提示词示例：产品展示
+
+```
+0–3s: Product enters frame with dynamic rotation, close-up on surface texture
+4–8s: Multiple angle transitions with highlight scanning light effects
+9–12s: Product in lifestyle context showing usage scenario
+13–15s: Hero shot with brand tagline, background music builds to resolution
+Sound: Reference @Audio1's background music, add product interaction sound effects
 ```
 
 ### 为什么用 curl 而非 urllib
