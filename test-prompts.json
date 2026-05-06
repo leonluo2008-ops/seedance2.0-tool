@@ -1,7 +1,7 @@
 [
   {
     "id": 1,
-    "prompt": "python3 seedance.py create --ref-images ./char.png --video-ref ./motion.mp4 --prompt \"使用图片1的角色，替换视频1中的角色，纯白色背景，表情自然流畅\" --duration 5 --ratio 1:1 --wait --download ./output",
+    "prompt": "python3 seedance.py create --ref-images ./char.png --video-refs ./motion.mp4 --prompt \"@角色图模仿@动作视频的动作，纯白背景，画幅1:1\" --duration 5 --ratio 1:1 --wait --download ./output",
     "expected": "本地文件通过 Chevereto 上传 → 创建任务 → 轮询等待 → 下载视频到 ./output/"
   },
   {

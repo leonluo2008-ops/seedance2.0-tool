@@ -6,7 +6,7 @@
 
 - 🎬 调用 Seedance 2.0 模型生成视频
 - 🖼️ 支持图片参考、视频参考、音频参考
-- ✍️ 支持文生视频、图片生视频、角色替换等多种模式
+- ✍️ 支持文生视频、图片生视频、动作模仿等多种模式
 - ☁️ 本地文件自动上传 Chevereto 图床（公网可访问）
 
 ## 快速开始
@@ -31,11 +31,11 @@ export CHEVERETO_API_KEY="your-chevereto-api-key"
 ### 3. 生成视频
 
 ```bash
-# 角色替换（图片 + 视频参考）⭐
+# 动作模仿（图片 + 视频参考）⭐
 python3 seedance.py create \
   --ref-images ./character.png \
-  --video-ref ./motion.mp4 \
-  --prompt "使用图片1的角色，替换视频1中的角色，纯白色背景，表情自然流畅" \
+  --video-refs ./motion.mp4 \
+  --prompt "@角色图模仿@动作视频的动作，纯白背景，画幅1:1" \
   --duration 5 \
   --ratio 1:1 \
   --wait \
@@ -55,7 +55,7 @@ python3 seedance.py create \
 |------|------|--------|
 | `--prompt` / `-p` | 文字提示词 | - |
 | `--ref-images` | 参考图片（角色参考） | - |
-| `--video-ref` | 参考视频（本地文件自动上传） | - |
+| `--video-refs` | 参考视频（本地文件自动上传） | - |
 | `--image` / `-i` | 首帧图片 | - |
 | `--audio` | 参考音频 | - |
 | `--model` / `-m` | 模型 ID | `doubao-seedance-2-0-fast-260128` |
