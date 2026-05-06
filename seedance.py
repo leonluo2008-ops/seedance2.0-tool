@@ -15,7 +15,6 @@ Seedance 2.0 Tool - 纯视频生成工具（唯一图床：Chevereto）
 """
 
 import argparse
-import hashlib
 import json
 import os
 import subprocess
@@ -24,6 +23,17 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
+
+
+def parse_bool(v):
+    """Parse boolean CLI argument (true/false/1/0)."""
+    if isinstance(v, bool):
+        return v
+    if v.lower() in ("true", "1", "yes"):
+        return True
+    if v.lower() in ("false", "0", "no"):
+        return False
+    raise argparse.ArgumentTypeError(f"Boolean expected, got '{v}'")
 
 # ============ 配置 ============
 
@@ -130,6 +140,20 @@ def resolve_video_url(video_input: str) -> str:
     return upload_video(video_input)
 
 
+def resolve_audio_url(audio_input: str) -> str:
+    """解析音频输入：URL 直接返回，本地文件上传 Chevereto。"""
+    if audio_input.startswith(("http://", "https://", "data:")):
+        return audio_input
+    suffix = Path(audio_input).suffix.lower()
+    mime_type = {
+        ".mp3": "audio/mpeg",
+        ".wav": "audio/wav",
+        ".aac": "audio/aac",
+        ".m4a": "audio/mp4",
+    }.get(suffix, "application/octet-stream")
+    return upload_to_chevereto(audio_input, mime_type)
+
+
 # ============ 工具函数 ============
 
 def verify_url_accessible(url: str, timeout: int = 10) -> bool:
@@ -228,31 +252,50 @@ def download_video(url: str, output_path: str) -> bool:
 
 def cmd_create(args):
     """创建视频生成任务"""
-    ref_image_urls = [resolve_image_url(img) for img in (args.ref_images or [])]
-    video_ref_urls = [resolve_video_url(vid) for vid in (args.video_refs or [])]
-
     content = []
-    if args.prompt:
-        content.append({"type": "text", "text": args.prompt})
 
-    for url in ref_image_urls:
-        content.append({
-            "type": "image_url",
-            "image_url": {"url": url},
-            "role": "reference_image"
-        })
+    # 草稿模式：直接用 draft_task_id 生成正式视频
+    if getattr(args, "draft_task_id", None):
+        content.append({"type": "draft_task", "draft_task": {"id": args.draft_task_id}})
+    else:
+        if getattr(args, "prompt", None):
+            content.append({"type": "text", "text": args.prompt})
 
-    for url in video_ref_urls:
-        content.append({
-            "type": "video_url",
-            "video_url": {"url": url},
-            "role": "reference_video"
-        })
+        # 参考图片（角色参考）
+        ref_images = getattr(args, "ref_images", None) or []
+        for img in ref_images:
+            content.append({
+                "type": "image_url",
+                "image_url": {"url": resolve_image_url(img)},
+                "role": "reference_image"
+            })
+
+        # 首帧/尾帧图片（与参考图片二选一）
+        if getattr(args, "image", None):
+            img_url = resolve_image_url(args.image)
+            content.append({"type": "image_url", "image_url": {"url": img_url}, "role": "first_frame"})
+            if getattr(args, "last_frame", None):
+                content.append({"type": "image_url", "image_url": {"url": resolve_image_url(args.last_frame)}, "role": "last_frame"})
+
+        # 参考视频
+        video_refs = getattr(args, "video_refs", None) or []
+        for vid in video_refs:
+            content.append({
+                "type": "video_url",
+                "video_url": {"url": resolve_video_url(vid)},
+                "role": "reference_video"
+            })
+
+        # 参考音频
+        audio_refs = getattr(args, "audio", None) or []
+        for audio in audio_refs:
+            content.append({"type": "audio_url", "audio_url": {"url": resolve_audio_url(audio)}})
 
     if not content:
-        print("Error: Must provide --prompt, --ref-images, or --video-refs.", file=sys.stderr)
+        print("Error: Must provide --prompt, --image, --ref-images, --video-refs, --audio, or --draft-task-id.", file=sys.stderr)
         sys.exit(1)
 
+    # 构建请求体
     body = {
         "model": args.model,
         "content": content,
@@ -262,6 +305,22 @@ def cmd_create(args):
             "ratio": args.ratio,
         }
     }
+
+    # 可选高级参数
+    if getattr(args, "seed", None) is not None:
+        body["parameters"]["seed"] = args.seed
+    if getattr(args, "camera_fixed", None) is not None:
+        body["parameters"]["camera_fixed"] = args.camera_fixed
+    if getattr(args, "watermark", None) is not None:
+        body["parameters"]["watermark"] = args.watermark
+    if getattr(args, "generate_audio", None) is not None:
+        body["parameters"]["generate_audio"] = args.generate_audio
+    if getattr(args, "draft", None) is not None:
+        body["parameters"]["draft"] = args.draft
+    if getattr(args, "return_last_frame", None) is not None:
+        body["parameters"]["return_last_frame"] = args.return_last_frame
+    if getattr(args, "service_tier", None):
+        body["parameters"]["service_tier"] = args.service_tier
 
     print(f"Creating task with model {args.model}...")
     result = api_request("POST", f"{BASE_URL}", body)
@@ -332,14 +391,25 @@ Environment variables:
     subparsers = parser.add_subparsers(dest="command", help="Commands")
 
     create_parser = subparsers.add_parser("create", help="创建视频生成任务")
-    create_parser.add_argument("--ref-images", nargs="+", help="参考图片路径或URL")
+    create_parser.add_argument("--ref-images", nargs="+", help="参考图片路径或URL（角色参考）")
+    create_parser.add_argument("--image", "-i", help="首帧图片路径或URL")
+    create_parser.add_argument("--last-frame", help="尾帧图片路径或URL")
     create_parser.add_argument("--video-refs", nargs="+", help="参考视频路径或URL")
-    create_parser.add_argument("--prompt", help="提示词")
-    create_parser.add_argument("--model", default=DEFAULT_MODEL, help=f"模型ID（默认: {DEFAULT_MODEL}）")
-    create_parser.add_argument("--duration", type=int, default=5, help="视频时长（秒）")
-    create_parser.add_argument("--resolution", default="720p", help="分辨率（720p/1080p）")
-    create_parser.add_argument("--ratio", default="1:1", help="画幅（1:1/16:9/9:16）")
-    create_parser.add_argument("--wait", action="store_true", help="等待生成完成")
+    create_parser.add_argument("--audio", nargs="+", help="参考音频路径或URL")
+    create_parser.add_argument("--draft-task-id", help="草稿任务ID（从草稿生成正式视频）")
+    create_parser.add_argument("--prompt", "-p", help="文字提示词")
+    create_parser.add_argument("--model", "-m", default=DEFAULT_MODEL, help=f"模型ID（默认: {DEFAULT_MODEL}）")
+    create_parser.add_argument("--ratio", default="1:1", help="画幅（1:1/16:9/4:3/9:16/21:9/adaptive）")
+    create_parser.add_argument("--duration", type=int, default=5, help="视频时长（秒，4-15，或-1自动）")
+    create_parser.add_argument("--resolution", default="720p", help="分辨率（480p/720p/1080p）")
+    create_parser.add_argument("--seed", type=int, help="随机种子（-1=随机，用于复现）")
+    create_parser.add_argument("--camera-fixed", type=parse_bool, help="固定镜头位置（true/false）")
+    create_parser.add_argument("--watermark", type=parse_bool, default=True, help="添加水印（true/false，默认true）")
+    create_parser.add_argument("--generate-audio", type=parse_bool, help="生成音频（true/false）")
+    create_parser.add_argument("--draft", type=parse_bool, help="草稿/预览模式（true/false）")
+    create_parser.add_argument("--return-last-frame", type=parse_bool, help="返回尾帧图片URL（true/false）")
+    create_parser.add_argument("--service-tier", choices=["default", "flex"], help="服务层级（flex=离线便宜50%%）")
+    create_parser.add_argument("--wait", "-w", action="store_true", help="等待生成完成")
     create_parser.add_argument("--download", help="下载到的本地路径")
     create_parser.set_defaults(func=cmd_create)
 
