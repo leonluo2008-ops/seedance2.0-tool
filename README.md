@@ -1,12 +1,13 @@
 # Seedance 2.0 Tool
 
-纯视频生成工具，调用 Volcengine Seedance 2.0 API，支持多种文件托管后端。
+纯视频生成工具，调用 Volcengine Seedance 2.0 API 生成视频。
 
 ## 核心功能
 
 - 🎬 调用 Seedance 2.0 模型生成视频
 - 🖼️ 支持图片参考、视频参考、音频参考
-- ☁️ 支持多种文件托管后端（Chevereto / Nginx Docker / HTTP URL）
+- ✍️ 支持文生视频、图片生视频、角色替换等多种模式
+- ☁️ 本地文件自动上传 Chevereto 图床（公网可访问）
 
 ## 快速开始
 
@@ -23,73 +24,59 @@ cd seedance2.0-tool
 # 必填：Volcengine Ark API Key
 export ARK_API_KEY="your-ark-api-key"
 
-# 使用 Chevereto 后端时必填：图床 API Key
+# 必填：Chevereto 图床 API Key（上传本地文件用）
 export CHEVERETO_API_KEY="your-chevereto-api-key"
 ```
 
 ### 3. 生成视频
 
 ```bash
+# 角色替换（图片 + 视频参考）⭐
 python3 seedance.py create \
   --ref-images ./character.png \
-  --video-refs ./motion.mp4 \
-  --prompt "使用图片1的角色，替换视频1中的角色，纯白色背景" \
+  --video-ref ./motion.mp4 \
+  --prompt "使用图片1的角色，替换视频1中的角色，纯白色背景，表情自然流畅" \
   --duration 5 \
   --ratio 1:1 \
-  --upload-backend chevereto \
   --wait \
   --download ./output
-```
 
-## 文件托管后端
-
-| 后端 | 说明 | 适用场景 |
-|------|------|----------|
-| `chevereto` | Chevereto 图床 API（推荐） | **跨平台使用** |
-| `nginx-docker` | docker cp 到 nginx 容器 | 仅限本地 OpenClaw 环境 |
-| `http-url` | 直接使用公网 URL | 已有公网链接 |
-
-### Chevereto 图床服务
-
-本工具使用 Chevereto 作为默认图床后端。
-
-**使用流程：**
-1. 向图床服务提供者获取 API Key
-2. 设置环境变量 `CHEVERETO_API_KEY`
-3. 使用 `--upload-backend chevereto` 即可自动上传
-
-**自建图床（可选）：**
-1. 安装 Chevereto（支持 Docker）
-2. 在设置中启用 API 功能并获取 API Key
-3. 确保图床可通过公网访问
-4. 将 API Key 提供给工具使用者
-
-## 命令说明
-
-```bash
-# 创建视频生成任务
-seedance.py create [options]
-
-# 查询任务状态
-seedance.py status <task_id>
-
-# 等待任务完成并下载
-seedance.py wait <task_id> --download ./output
+# 文生视频
+python3 seedance.py create \
+  --prompt "宇航员在太空中行走，漂浮感，电影质感" \
+  --duration 5 \
+  --ratio 1:1 \
+  --wait
 ```
 
 ## 主要参数
 
 | 参数 | 说明 | 默认值 |
 |------|------|--------|
-| `--ref-images` | 参考图片路径或 URL | - |
-| `--video-refs` | 参考视频路径或 URL | - |
-| `--prompt` | 提示词 | - |
-| `--model` | 模型 ID | doubao-seedance-2-0-fast-260128 |
-| `--duration` | 视频时长（秒） | 5 |
-| `--ratio` | 画幅 | 1:1 |
-| `--upload-backend` | 文件托管后端 | chevereto |
-| `--wait` | 等待生成完成 | False |
-| `--download` | 下载保存路径 | - |
+| `--prompt` / `-p` | 文字提示词 | - |
+| `--ref-images` | 参考图片（角色参考） | - |
+| `--video-ref` | 参考视频（本地文件自动上传） | - |
+| `--image` / `-i` | 首帧图片 | - |
+| `--audio` | 参考音频 | - |
+| `--model` / `-m` | 模型 ID | `doubao-seedance-2-0-fast-260128` |
+| `--duration` / `-d` | 时长（秒，4-15） | `5` |
+| `--ratio` | 画幅（16:9/4:3/1:1/3:4/9:16/21:9/adaptive） | `1:1` |
+| `--resolution` / `-r` | 分辨率（480p/720p/1080p） | `720p` |
+| `--seed` | 随机种子（-1=随机） | `-1` |
+| `--watermark` | 添加水印 | `true` |
+| `--service-tier` | 服务层级（default/flex） | `default` |
+| `--wait` / `-w` | 等待生成完成 | - |
+| `--download` | 下载目录 | - |
+
+## 命令
+
+```bash
+python3 seedance.py create [options]   # 创建任务
+python3 seedance.py status <task_id>   # 查询状态
+python3 seedance.py wait <task_id>     # 等待完成
+python3 seedance.py list [--status succeeded]  # 列出任务
+python3 seedance.py delete <task_id>   # 删除任务
+```
 
 ## License
 

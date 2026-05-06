@@ -1,17 +1,17 @@
 [
   {
     "id": 1,
-    "prompt": "python3 seedance.py create --ref-images ./char.png --video-refs ./motion.mp4 --prompt \"使用图片1的角色，替换视频1中的角色，纯白色背景\" --duration 5 --ratio 1:1 --upload-backend chevereto --wait --download ./output",
-    "expected": "Chevereto上传图片+视频 → 创建任务 → 轮询等待 → 下载视频到 ./output/"
+    "prompt": "python3 seedance.py create --ref-images ./char.png --video-ref ./motion.mp4 --prompt \"使用图片1的角色，替换视频1中的角色，纯白色背景，表情自然流畅\" --duration 5 --ratio 1:1 --wait --download ./output",
+    "expected": "本地文件通过 Chevereto 上传 → 创建任务 → 轮询等待 → 下载视频到 ./output/"
   },
   {
     "id": 2,
-    "prompt": "python3 seedance.py create --ref-images https://example.com/char.png --video-refs https://example.com/motion.mp4 --prompt \"角色替换\" --upload-backend http-url",
-    "expected": "直接使用公网URL，不上传，返回 task_id"
+    "prompt": "python3 seedance.py create --image https://example.com/hero.png --prompt \"宇航员在太空中行走\" --duration 5 --ratio 16:9 --wait",
+    "expected": "公网 URL 直接使用，不上传，返回 task_id，轮询完成"
   },
   {
     "id": 3,
     "prompt": "python3 seedance.py status <task_id>",
-    "expected": "查询任务状态，返回 JSON"
+    "expected": "查询任务状态，返回 JSON（含 status/created_at 等字段）"
   }
 ]
