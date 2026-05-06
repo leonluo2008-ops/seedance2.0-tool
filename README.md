@@ -58,7 +58,7 @@ python3 seedance.py create \
 | `--video-refs` | 参考视频（本地文件自动上传） | - |
 | `--image` / `-i` | 首帧图片 | - |
 | `--audio` | 参考音频 | - |
-| `--model` / `-m` | 模型 ID | `doubao-seedance-2-0-fast-260128` |
+| `--model` / `-m` | 模型 ID（Fast/高质量） | `doubao-seedance-2-0-fast-260128`（默认） |
 | `--duration` / `-d` | 时长（秒，4-15） | `5` |
 | `--ratio` | 画幅（16:9/4:3/1:1/3:4/9:16/21:9/adaptive） | `1:1` |
 | `--resolution` / `-r` | 分辨率（480p/720p/1080p） | `720p` |
