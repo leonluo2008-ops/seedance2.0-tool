@@ -35,7 +35,7 @@ export CHEVERETO_API_KEY="your-chevereto-api-key"
 python3 seedance.py create \
   --ref-images ./character.png \
   --video-refs ./motion.mp4 \
-  --prompt "@角色图模仿@动作视频的动作，纯白背景，画幅1:1" \
+  --prompt "@Image1's character mimics @Video1's action choreography, pure white background, 1:1 aspect ratio" \
   --duration 5 \
   --ratio 1:1 \
   --wait \
