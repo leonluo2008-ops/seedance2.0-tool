@@ -9,25 +9,19 @@ description: "调用 Volcengine Seedance 2.0 模型生成视频的 OpenClaw Skil
 
 ## 交付规范 ⭐
 
-> 视频生成完成后，根据当前对话渠道选择交付方式：
-
-1. **飞书渠道**：默认发送到当前飞书聊天框（使用 `message` 工具，media 指向本地视频路径，caption 写清楚 prompt 和素材信息）
-
-2. **其他渠道**：使用工具匹配的方式发送，或根据用户要求发送
-
-3. **记录任务 ID**：告知用户任务 ID 供追溯
+视频生成完成后，必须将生成的视频文件发送给用户（通过对话所在渠道的工具发送实际文件，禁止只发链接或文字描述）。
 
 ```python
 # 飞书发送示例
 message(
     action="send",
     channel="feishu",
-    media="/tmp/openclaw/output/生成视频.mp4",
-    caption="动作模仿测试：@Image1's character mimics @Video1's action choreography"
+    media="/home/luo/.openclaw/media/outbound/生成视频.mp4",
+    caption="生成完成"
 )
 ```
 
-> ⚠️ 禁止只发文字描述或链接，必须发实际视频文件。
+告知用户任务 ID 供追溯。
 
 ## 环境准备
 
@@ -233,6 +227,33 @@ subprocess.run([
     "-F", f"key={api_key}",
 ], capture_output=True)
 ```
+
+## 用户提示词翻译规则
+
+当用户用自然语言描述视频需求时，将其翻译为 Seedance 2.0 可理解的提示词。
+
+### 翻译对照表
+
+| 用户意图 | 翻译结果 |
+|---------|---------|
+| 模仿/复刻动作 | `@Image1's character mimics @Video1's action choreography` |
+| 纯白背景 | `pure white background` |
+| 1:1 画幅 | `1:1 aspect ratio` |
+| 角色外观 | `@Image1's character as the subject` |
+| 镜头跟随 | `reference @Video1's camera movement` |
+| 电影感/质感 | `cinematic quality, film grain, shallow depth of field` |
+| 全身/半身 | `full shot` / `medium close-up` |
+| 平滑过渡 | `smooth beat-synced transitions` |
+
+> **注意**：`@` 后面必须用英文占位符（@Image1、@Video1），中文标签模型不认。
+
+### 翻译示例
+
+| 用户说 | 翻译后 |
+|--------|--------|
+| 我要让这只猫模仿视频里的动作，纯白背景，1:1画幅 | `@Image1's character mimics @Video1's action choreography, pure white background, 1:1 aspect ratio` |
+| 生成一个科幻风格的城市景观 | `sci-fi city landscape, futuristic architecture, cinematic quality, wide establishing shot` |
+| 产品展示视频，15秒 | `0-5s: Product enters frame with dynamic rotation` / `6-10s: Close-up on details` / `11-15s: Hero shot with brand tagline` |
 
 ## 提示词编写指南（@ 参考系统）
 
