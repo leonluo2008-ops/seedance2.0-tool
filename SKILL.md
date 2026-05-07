@@ -67,7 +67,9 @@ python3 seedance.py create \
   --wait
 ```
 
-### 3. 动作模仿（图片参考 + 视频参考）⭐ 最常用
+### 3. 动作模仿（角色替换）⭐ 最常用
+
+**用途**：保留视频动作，更换角色外观。角色A → 角色B，执行视频里同样的动作。
 
 ```bash
 python3 seedance.py create \
@@ -80,13 +82,17 @@ python3 seedance.py create \
   --download ./output
 ```
 
-### 4. 动作复刻（场景图 + 视频参考）
+### 4. 动作复刻（场景不变，换动作）
+
+**用途**：保留场景图，更换视频动作。场景不变，视频里的动作替换为新的动作编排。
 
 ```bash
 python3 seedance.py create \
   --image ./scene.jpg \
   --video-refs ./ref.mp4 \
-  --prompt "动作复刻，保持场景一致性" \
+  --prompt "@Image1's action choreography, @Image2 as the scene background, cinematic quality" \
+  --duration 5 \
+  --ratio 1:1 \
   --wait
 ```
 
