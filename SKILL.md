@@ -162,6 +162,7 @@ python3 seedance.py create \
 | `--wait` / `-w` | 创建后等待生成完成 |
 | `--interval` | 轮询间隔秒数（默认 15） |
 | `--download` | 下载目录（默认当前目录） |
+| `--force` / `-y` | 跳过确认步骤，直接执行。**Agent 场景专用**：当 Agent 已完成用户确认，可以传此参数跳过 SKILL.md 中的确认步骤，直接调用 API |
 
 ## 工作流程
 

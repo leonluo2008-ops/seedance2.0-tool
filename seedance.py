@@ -420,6 +420,7 @@ Environment variables:
     create_parser.add_argument("--service-tier", choices=["default", "flex"], help="服务层级（flex=离线便宜50%%）")
     create_parser.add_argument("--wait", "-w", action="store_true", help="等待生成完成")
     create_parser.add_argument("--download", help="下载到的本地路径")
+    create_parser.add_argument("--force", "-y", action="store_true", help="跳过确认步骤，直接执行（Agent 场景使用）")
     create_parser.set_defaults(func=cmd_create)
 
     status_parser = subparsers.add_parser("status", help="查询任务状态")
