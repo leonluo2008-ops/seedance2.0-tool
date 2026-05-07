@@ -338,7 +338,7 @@ def cmd_create(args):
         result = wait_for_completion(task_id)
 
         if args.download:
-            video_url = result.get("data", {}).get("video_url")
+            video_url = result.get("content", {}).get("video_url")
             if video_url:
                 download_video(video_url, args.download)
             else:
@@ -364,7 +364,7 @@ def cmd_wait(args):
     result = wait_for_completion(args.task_id)
 
     if args.download:
-        video_url = result.get("data", {}).get("video_url")
+        video_url = result.get("content", {}).get("video_url")
         if video_url:
             download_video(video_url, args.download)
 

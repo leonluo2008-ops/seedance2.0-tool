@@ -166,7 +166,7 @@ python3 seedance.py create \
    └── 状态: pending → running → succeeded / failed
 
 5. 下载结果（如指定 --download）
-   └── 从响应中提取 video_url
+   └── 响应结构：`result["content"]["video_url"]`
    └── 用 urllib 下载到本地
 ```
 
