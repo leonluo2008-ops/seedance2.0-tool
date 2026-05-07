@@ -23,6 +23,7 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
+from dotenv import load_dotenv
 
 
 def parse_bool(v):
@@ -373,6 +374,14 @@ def cmd_wait(args):
 # ============ 主入口 ============
 
 def main():
+    # 自动加载 .env 文件（从脚本所在目录向上查找）
+    script_dir = Path(__file__).resolve().parent
+    for candidate in [script_dir, script_dir.parent, Path.cwd()]:
+        env_path = candidate / ".env"
+        if env_path.exists():
+            load_dotenv(env_path)
+            break
+
     parser = argparse.ArgumentParser(
         description="Seedance 2.0 Tool - 视频生成工具（唯一图床：Chevereto）",
         formatter_class=argparse.RawDescriptionHelpFormatter,
