@@ -52,7 +52,7 @@ export CHEVERETO_API_KEY="your-chevereto-api-key"
 python3 seedance.py create \
   --prompt "宇航员在太空中行走，漂浮感，电影质感" \
   --duration 5 \
-  --ratio 1:1 \
+  --ratio 16:9 \
   --wait \
   --download ./output
 ```
@@ -101,7 +101,7 @@ python3 seedance.py create \
   --video-refs ./ref.mp4 \
   --prompt "@Image1's action choreography, @Image2 as the scene background, cinematic quality" \
   --duration 5 \
-  --ratio 1:1 \
+  --ratio 16:9 \
   --wait
 ```
 
@@ -136,7 +136,7 @@ python3 seedance.py create \
 | 参数 | 说明 | 可选值 | 默认值 |
 |------|------|--------|--------|
 | `--model` | 模型 ID | `doubao-seedance-2-0-fast-260128`（Fast）/ `doubao-seedance-2-0-260128`（高质量） | `doubao-seedance-2-0-fast-260128` |
-| `--ratio` | 画幅比例 | `16:9` / `4:3` / `1:1` / `3:4` / `9:16` / `21:9` / `adaptive` | `1:1`（⚠️ 使用视频参考时可能不生效） |
+| `--ratio` | 画幅比例 | `16:9` / `4:3` / `1:1` / `3:4` / `9:16` / `21:9` / `adaptive` | `16:9`（⚠️ 使用视频参考时可能不生效） |
 | `--duration` | 视频时长（秒） | `4-15`，或 `-1`（模型自动判断） | `5` |
 | `--resolution` | 输出分辨率 | `480p` / `720p` / `1080p` | `720p` |
 | `--seed` | 随机种子 | 整数，`-1` 表示随机 | `-1` |
