@@ -35,9 +35,9 @@ export CHEVERETO_API_KEY="your-chevereto-api-key"
 python3 seedance.py create \
   --ref-images ./character.png \
   --video-refs ./motion.mp4 \
-  --prompt "@Image1's character mimics @Video1's action choreography, pure white background, 1:1 aspect ratio" \
+  --prompt "@Image1's character mimics @Video1's action choreography, pure white background" \
   --duration 5 \
-  --ratio 1:1 \
+  --ratio 16:9 \
   --wait \
   --download ./output
 
@@ -45,7 +45,7 @@ python3 seedance.py create \
 python3 seedance.py create \
   --prompt "宇航员在太空中行走，漂浮感，电影质感" \
   --duration 5 \
-  --ratio 1:1 \
+  --ratio 16:9 \
   --wait
 ```
 

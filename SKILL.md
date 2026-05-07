@@ -82,9 +82,9 @@ python3 seedance.py create \
 python3 seedance.py create \
   --ref-images ./character.png \
   --video-refs ./motion.mp4 \
-  --prompt "@Image1's character mimics @Video1's action choreography, pure white background, 1:1 aspect ratio" \
+  --prompt "@Image1's character mimics @Video1's action choreography, pure white background" \
   --duration 5 \
-  --ratio 1:1 \
+  --ratio 16:9 \
   --wait \
   --download ./output
 ```
@@ -277,7 +277,7 @@ subprocess.run([
 |---------|---------|
 | 模仿/复刻动作 | `@Image1's character mimics @Video1's action choreography` |
 | 纯白背景 | `pure white background` |
-| 1:1 画幅 | `1:1 aspect ratio` |
+| 16:9 画幅 | `16:9 aspect ratio` |
 | 角色外观 | `@Image1's character as the subject` |
 | 镜头跟随 | `reference @Video1's camera movement` |
 | 电影感/质感 | `cinematic quality, film grain, shallow depth of field` |
@@ -290,7 +290,7 @@ subprocess.run([
 
 | 用户说 | 翻译后 |
 |--------|--------|
-| 我要让这只猫模仿视频里的动作，纯白背景，1:1画幅 | `@Image1's character mimics @Video1's action choreography, pure white background, 1:1 aspect ratio` |
+| 我要让这只猫模仿视频里的动作，纯白背景，16:9画幅 | `@Image1's character mimics @Video1's action choreography, pure white background, 16:9 aspect ratio` |
 | 生成一个科幻风格的城市景观 | `sci-fi city landscape, futuristic architecture, cinematic quality, wide establishing shot` |
 | 产品展示视频，15秒 | `0-5s: Product enters frame with dynamic rotation` / `6-10s: Close-up on details` / `11-15s: Hero shot with brand tagline` |
 
@@ -410,7 +410,7 @@ and action choreography, BGM references @Audio1, scene references @Image2
 ### 提示词示例：动作模仿
 
 ```
-@Image1's character mimics @Video1's action choreography, pure white background, 1:1 aspect ratio
+@Image1's character mimics @Video1's action choreography, pure white background
 ```
 
 > **映射规则**：按上传顺序自动对应 — `--ref-images` 第一个文件 = @Image1，`--video-refs` 第一个文件 = @Video1。`@` 后面必须用英文占位符（@Image1、@Video1），不支持中文标签。
