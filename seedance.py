@@ -412,7 +412,7 @@ Environment variables:
     create_parser.add_argument("--model", "-m", default=DEFAULT_MODEL, help=f"模型ID（默认: {DEFAULT_MODEL}，仅支持Seedance 2.0系列）")
     create_parser.add_argument("--ratio", default="16:9", help="画幅（1:1/16:9/4:3/9:16/21:9/adaptive）")
     create_parser.add_argument("--duration", type=int, default=5, help="视频时长（秒，4-15，或-1自动）")
-    create_parser.add_argument("--resolution", default="720p", help="分辨率（480p/720p/1080p）")
+    create_parser.add_argument("--resolution", default="480p", help="分辨率（480p/720p/1080p）")
     create_parser.add_argument("--seed", type=int, help="随机种子（-1=随机，用于复现）")
     create_parser.add_argument("--camera-fixed", type=parse_bool, help="固定镜头位置（true/false）")
     create_parser.add_argument("--watermark", type=parse_bool, default=True, help="添加水印（true/false，默认true）")

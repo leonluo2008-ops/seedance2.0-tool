@@ -63,7 +63,7 @@ python3 seedance.py create \
 | `--model` / `-m` | 模型 ID | `doubao-seedance-2-0-fast-260128`（默认） |
 | `--duration` / `-d` | 时长（秒，**4-15**，或 `-1` 自动） | `5` |
 | `--ratio` | 画幅（16:9/4:3/1:1/3:4/9:16/21:9/adaptive） | `16:9` |
-| `--resolution` / `-r` | 分辨率（480p/720p/1080p） | `720p` |
+| `--resolution` / `-r` | 分辨率（480p/720p/1080p） | `480p` |
 | `--seed` | 随机种子（-1=随机） | `-1` |
 | `--watermark` | 添加水印 | `true` |
 | `--service-tier` | 服务层级（default/flex） | `default` |
