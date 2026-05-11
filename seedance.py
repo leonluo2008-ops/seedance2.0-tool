@@ -38,7 +38,12 @@ def parse_bool(v):
 
 # ============ 配置 ============
 
+# ⚠️ 仅使用 Seedance 2.0 系列模型，禁止 1.0 系列和 2.0-pro 系列
 DEFAULT_MODEL = "doubao-seedance-2-0-fast-260128"
+SUPPORTED_MODELS = [
+    "doubao-seedance-2-0-fast-260128",   # Fast 模式，速度优先
+    "doubao-seedance-2-0-260128",        # 高质量模式，质量优先
+]
 BASE_URL = "https://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks"
 CHEVERETO_API_URL = "https://chevereto.aistar.work/api/1/upload"
 
@@ -407,7 +412,7 @@ Environment variables:
     create_parser.add_argument("--audio", nargs="+", help="参考音频路径或URL")
     create_parser.add_argument("--draft-task-id", help="草稿任务ID（从草稿生成正式视频）")
     create_parser.add_argument("--prompt", "-p", help="文字提示词")
-    create_parser.add_argument("--model", "-m", default=DEFAULT_MODEL, help=f"模型ID（默认: {DEFAULT_MODEL}）")
+    create_parser.add_argument("--model", "-m", default=DEFAULT_MODEL, help=f"模型ID（默认: {DEFAULT_MODEL}，仅支持Seedance 2.0系列）")
     create_parser.add_argument("--ratio", default="16:9", help="画幅（1:1/16:9/4:3/9:16/21:9/adaptive）")
     create_parser.add_argument("--duration", type=int, default=5, help="视频时长（秒，4-15，或-1自动）")
     create_parser.add_argument("--resolution", default="720p", help="分辨率（480p/720p/1080p）")

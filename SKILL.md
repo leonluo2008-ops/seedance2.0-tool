@@ -1,6 +1,6 @@
 ---
 name: seedance2.0-tool
-description: "调用 Volcengine Seedance 2.0 模型生成视频的 OpenClaw Skill。支持图片参考、视频参考、音频参考、文生视频等多种模式。通过 Chevereto 图床中转上传本地文件（绕过 Cloudflare 拦截），返回公网 URL 给 Seedance API。触发词：seedance、视频生成、seedance2.0、生成视频、视频模型、文生视频"
+description: "调用 Volcengine Seedance 2.0 模型生成视频的 OpenClaw Skill。⚠️ 仅使用 Seedance 2.0 系列模型（doubao-seedance-2-0-fast-260128 / doubao-seedance-2-0-260128），禁止使用 Seedance 1.0 系列模型。支持图片参考、视频参考、音频参考、文生视频等多种模式。通过 Chevereto 图床中转上传本地文件（绕过 Cloudflare 拦截），返回公网 URL 给 Seedance API。触发词：seedance、视频生成、seedance2.0、生成视频、视频模型、文生视频"
 ---
 
 # Seedance 2.0 Tool Skill
@@ -78,6 +78,11 @@ python3 seedance.py create \
 
 **用途**：保留视频动作，更换角色外观。角色A → 角色B，执行视频里同样的动作。
 
+> ✅ **执行前确认**：请确认你已提供：
+> - 角色参考图（`--ref-images`）：要出现的新角色外观
+> - 视频参考（`--video-refs`）：要模仿的动作编排
+> - 画幅和时长参数
+
 ```bash
 python3 seedance.py create \
   --ref-images ./character.png \
@@ -133,13 +138,17 @@ python3 seedance.py create \
 
 ### 模型控制
 
+> ⚠️ **模型限制**：本 skill **仅使用 Seedance 2.0 系列模型**，禁止使用 Seedance 1.0 系列模型。禁止使用 seedance-2-0-pro 系列模型。
+
 | 参数 | 说明 | 可选值 | 默认值 |
 |------|------|--------|--------|
-| `--model` | 模型 ID | `doubao-seedance-2-0-fast-260128`（Fast）/ `doubao-seedance-2-0-260128`（高质量） | `doubao-seedance-2-0-fast-260128` |
+| `--model` | 模型 ID | `doubao-seedance-2-0-fast-260128`（Fast，速度优先）/ `doubao-seedance-2-0-260128`（高质量，质量优先） | `doubao-seedance-2-0-fast-260128` |
 | `--ratio` | 画幅比例 | `16:9` / `4:3` / `1:1` / `3:4` / `9:16` / `21:9` / `adaptive` | `16:9`（⚠️ 使用视频参考时可能不生效） |
 | `--duration` | 视频时长（秒） | `4-15`，或 `-1`（模型自动判断） | `5` |
 | `--resolution` | 输出分辨率 | `480p` / `720p` / `1080p` | `720p` |
 | `--seed` | 随机种子 | 整数，`-1` 表示随机 | `-1` |
+
+> ⚠️ **已知问题**：`--duration` 参数在部分 API Key 下可能不生效，API 实际输出固定 5 秒。这是服务端行为，非客户端配置问题。如需更长时长，建议直接使用 `-1`（模型自动判断）或在任务创建后通过 `--draft` 模式尝试。
 
 ### 高级参数
 
@@ -148,10 +157,9 @@ python3 seedance.py create \
 | `--camera-fixed` | 固定镜头位置 | `true` / `false` |
 | `--watermark` | 添加水印 | `true`（默认）/ `false` |
 | `--generate-audio` | 生成音频 | `true` / `false` |
-| `--draft` | 草稿/预览模式（1.5 Pro） | `true` / `false` |
+| `--draft` | 草稿/预览模式 | `true` / `false` |
 | `--return-last-frame` | 返回尾帧图片 URL | `true` / `false` |
 | `--service-tier` | 服务层级 | `default`（在线）/ `flex`（离线，便宜 50%） |
-| `--frames` | 精确帧数（1.0 模型） | `25+4n`，范围 29-289 |
 | `--execution-expires-after` | 任务超时（秒） | `3600-259200` |
 | `--callback-url` | 回调 Webhook URL | `https://example.com/webhook` |
 
@@ -240,13 +248,9 @@ python3 seedance.py status <task_id>
 
 # 等待任务完成
 python3 seedance.py wait <task_id> [--download ./dir]
-
-# 列出任务
-python3 seedance.py list [--status succeeded] [--page 1]
-
-# 删除任务
-python3 seedance.py delete <task_id>
 ```
+
+> ⚠️ `--list` / `--delete` 子命令尚未实现，如有需要请在 seedance.py 中补充。
 
 ## 技术细节
 
