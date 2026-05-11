@@ -23,6 +23,21 @@ message(
 
 告知用户任务 ID 供追溯。
 
+### 结构化输出格式（执行后必须遵循）
+
+视频生成完成后，按以下格式输出执行结果：
+
+```
+## 视频生成结果
+- **任务ID**: cgt-xxx
+- **模型**: doubao-seedance-2-0-fast-260128
+- **时长**: 10s / 480p / 16:9
+- **风格**: <prompt中的风格描述>
+- **动作**: <主要动作描述>
+- **文件**: /path/to/video.mp4
+- **状态**: ✅ 生成完成
+```
+
 ## 环境准备
 
 ### 必填环境变量
@@ -438,3 +453,91 @@ Sound: Reference @Audio1's background music, add product interaction sound effec
 ### 为什么用 curl 而非 urllib
 
 Cloudflare 会拦截来自数据中心 IP 的 urllib/requests 请求（ASN block 1010）。curl 来自用户环境，绕过此限制。
+
+## 批量生成模式
+
+当需要生成多个视频时，使用 JSON Spec 预检文件 + 批量执行脚本。
+
+### JSON Spec 文件格式
+
+每个视频任务对应一个 `.json` 文件：
+
+```json
+{
+  "prompt": "宇航员在太空中行走，漂浮感，电影质感",
+  "model": "doubao-seedance-2-0-fast-260128",
+  "duration": 10,
+  "ratio": "16:9",
+  "resolution": "480p",
+  "ref_images": [],
+  "video_refs": [],
+  "audio": [],
+  "output_name": "astronaut_walk"
+}
+```
+
+| 字段 | 类型 | 说明 | 默认值 |
+|------|------|------|--------|
+| `prompt` | string | 文字提示词 | — |
+| `model` | string | 模型 ID | `doubao-seedance-2-0-fast-260128` |
+| `duration` | int | 视频时长（秒，4-15） | `5` |
+| `ratio` | string | 画幅 | `16:9` |
+| `resolution` | string | 分辨率 | `480p` |
+| `ref_images` | string[] | 参考图片路径/URL | `[]` |
+| `video_refs` | string[] | 参考视频路径/URL | `[]` |
+| `audio` | string[] | 参考音频路径/URL | `[]` |
+| `output_name` | string | 输出文件名标识 | 文件名 |
+
+### 执行命令
+
+```bash
+# 批量执行（不等待每个任务完成，快速提交）
+python3 scripts/batch_generate.py tmp/batch_jobs/
+
+# 批量执行（等待每个任务完成）
+python3 scripts/batch_generate.py tmp/batch_jobs/ --wait
+
+# 仅预览命令，不实际执行
+python3 scripts/batch_generate.py tmp/batch_jobs/ --dry-run
+```
+
+### 执行流程
+
+1. 将多个 JSON Spec 文件放入一个目录（如 `tmp/batch_jobs/`）
+2. 运行 `batch_generate.py <目录>`
+3. 脚本依次读取每个 `.json` 文件，调用 seedance.py 执行
+4. 每个任务结果保存为 `<spec_name>.result.json`
+5. 汇总报告保存为 `batch_summary.json`
+
+### 结果文件格式
+
+每个任务执行后生成 `.result.json`：
+
+```json
+{
+  "spec_file": "tmp/batch_jobs/astronaut_walk.json",
+  "spec": { "prompt": "...", "duration": 10 },
+  "cmd": "python3 seedance.py create --prompt ...",
+  "status": "submitted",
+  "task_id": "cgt-xxx",
+  "error": null
+}
+```
+
+### 目录结构示例
+
+```
+tmp/batch_jobs/
+├── astronaut_walk.json       # Spec 文件 1
+├── astronaut_walk.result.json # 结果文件 1
+├── cat_playing.json         # Spec 文件 2
+├── cat_playing.result.json   # 结果文件 2
+└── batch_summary.json       # 汇总报告
+```
+
+### 注意事项
+
+- 本地文件（图片/视频/音频）会自动上传 Chevereto 图床
+- 任务提交后可在火山方舟控制台查看进度
+- 批量执行不等待，适合快速提交大量任务
+- 添加 `--wait` 会等待每个任务完成再执行下一个（耗时长）
