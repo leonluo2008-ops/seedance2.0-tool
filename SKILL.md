@@ -156,7 +156,7 @@ python3 seedance.py create \
 |------|------|------|
 | `--camera-fixed` | 固定镜头位置 | `true` / `false` |
 | `--watermark` | 添加水印 | `true`（默认）/ `false` |
-| `--generate-audio` | 生成音频 | `true` / `false` |
+| `--generate-audio` | 音视频联合生成（Seedance 2.0 原生能力） | `true` / `false` |
 | `--draft` | 草稿/预览模式 | `true` / `false` |
 | `--return-last-frame` | 返回尾帧图片 URL | `true` / `false` |
 | `--service-tier` | 服务层级 | `default`（在线）/ `flex`（离线，便宜 50%） |
@@ -407,6 +407,7 @@ and action choreography, BGM references @Audio1, scene references @Image2
 | 错误 | 正确做法 |
 |------|---------|
 | 只说 `reference @Video1` 不说参考什么 | 明确说 `reference @Video1's camera movement` |
+| 使用生僻字、特殊符号 | 优先使用常用字，确保最佳呈现效果 |
 | 同时要求固定镜头+环绕镜头 | 同一片段只选一种 |
 | 5秒塞太多场景 | 确保物理上可行 |
 | 上传5张图但没给每张分配角色 | 每个 @reference 都要有明确用途 |
