@@ -150,6 +150,10 @@ python3 seedance.py create \
 
 > ⚠️ **已知问题（已验证）**：`doubao-seedance-2-0-fast-260128` 在纯文生视频场景下，`duration` 参数**实际不生效**，API 固定返回 5 秒，`ratio` 参数也可能被覆盖。图片参考+视频参考的「动作模仿」模式相对更稳定。如需更长视频，建议通过视频续接（Video Extension）方式分段生成。
 
+> ⚠️ **首帧图生视频跳变**（画面拉伸/压缩）：将 `ratio` 设置为 `adaptive`，或将输入图片裁剪为与目标 ratio 一致的宽高比。
+
+> ⚠️ **视频 URL 有效期仅 24 小时**，超过需转存。推荐配置火山引擎 TOS 数据订阅自动转存。
+
 ### 高级参数
 
 | 参数 | 说明 | 示例 |
@@ -162,6 +166,7 @@ python3 seedance.py create \
 | `--service-tier` | 服务层级 | `default`（在线）/ `flex`（离线，便宜 50%） |
 | `--execution-expires-after` | 任务超时（秒） | `3600-259200` |
 | `--callback-url` | 回调 Webhook URL | `https://example.com/webhook` |
+| `tools: [{"type": "web_search"}]` | 联网搜索（仅纯文本模式） | 自动搜索互联网内容 |
 
 ### 执行控制
 
