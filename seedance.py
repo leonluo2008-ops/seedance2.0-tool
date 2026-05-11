@@ -301,32 +301,29 @@ def cmd_create(args):
         print("Error: Must provide --prompt, --image, --ref-images, --video-refs, --audio, or --draft-task-id.", file=sys.stderr)
         sys.exit(1)
 
-    # 构建请求体
+    # 构建请求体（duration/ratio/resolution/watermark 为顶层字段，非 parameters 内）
     body = {
         "model": args.model,
         "content": content,
-        "parameters": {
-            "duration": args.duration,
-            "resolution": args.resolution,
-            "ratio": args.ratio,
-        }
+        "duration": args.duration,
+        "resolution": args.resolution,
+        "ratio": args.ratio,
+        "watermark": args.watermark,
     }
 
     # 可选高级参数
     if getattr(args, "seed", None) is not None:
-        body["parameters"]["seed"] = args.seed
+        body["seed"] = args.seed
     if getattr(args, "camera_fixed", None) is not None:
-        body["parameters"]["camera_fixed"] = args.camera_fixed
-    if getattr(args, "watermark", None) is not None:
-        body["parameters"]["watermark"] = args.watermark
+        body["camera_fixed"] = args.camera_fixed
     if getattr(args, "generate_audio", None) is not None:
-        body["parameters"]["generate_audio"] = args.generate_audio
+        body["generate_audio"] = args.generate_audio
     if getattr(args, "draft", None) is not None:
-        body["parameters"]["draft"] = args.draft
+        body["draft"] = args.draft
     if getattr(args, "return_last_frame", None) is not None:
-        body["parameters"]["return_last_frame"] = args.return_last_frame
+        body["return_last_frame"] = args.return_last_frame
     if getattr(args, "service_tier", None):
-        body["parameters"]["service_tier"] = args.service_tier
+        body["service_tier"] = args.service_tier
 
     print(f"Creating task with model {args.model}...")
     result = api_request("POST", f"{BASE_URL}", body)
