@@ -38,7 +38,12 @@ def parse_bool(v):
 
 # ============ 配置 ============
 
+# ⚠️ 仅使用 Seedance 2.0 系列模型，禁止 1.0 系列和 2.0-pro 系列
 DEFAULT_MODEL = "doubao-seedance-2-0-fast-260128"
+SUPPORTED_MODELS = [
+    "doubao-seedance-2-0-fast-260128",   # Fast 模式，速度优先
+    "doubao-seedance-2-0-260128",        # 高质量模式，质量优先
+]
 BASE_URL = "https://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks"
 CHEVERETO_API_URL = "https://chevereto.aistar.work/api/1/upload"
 
@@ -296,32 +301,29 @@ def cmd_create(args):
         print("Error: Must provide --prompt, --image, --ref-images, --video-refs, --audio, or --draft-task-id.", file=sys.stderr)
         sys.exit(1)
 
-    # 构建请求体
+    # 构建请求体（duration/ratio/resolution/watermark 为顶层字段，非 parameters 内）
     body = {
         "model": args.model,
         "content": content,
-        "parameters": {
-            "duration": args.duration,
-            "resolution": args.resolution,
-            "ratio": args.ratio,
-        }
+        "duration": args.duration,
+        "resolution": args.resolution,
+        "ratio": args.ratio,
+        "watermark": args.watermark,
     }
 
     # 可选高级参数
     if getattr(args, "seed", None) is not None:
-        body["parameters"]["seed"] = args.seed
+        body["seed"] = args.seed
     if getattr(args, "camera_fixed", None) is not None:
-        body["parameters"]["camera_fixed"] = args.camera_fixed
-    if getattr(args, "watermark", None) is not None:
-        body["parameters"]["watermark"] = args.watermark
+        body["camera_fixed"] = args.camera_fixed
     if getattr(args, "generate_audio", None) is not None:
-        body["parameters"]["generate_audio"] = args.generate_audio
+        body["generate_audio"] = args.generate_audio
     if getattr(args, "draft", None) is not None:
-        body["parameters"]["draft"] = args.draft
+        body["draft"] = args.draft
     if getattr(args, "return_last_frame", None) is not None:
-        body["parameters"]["return_last_frame"] = args.return_last_frame
+        body["return_last_frame"] = args.return_last_frame
     if getattr(args, "service_tier", None):
-        body["parameters"]["service_tier"] = args.service_tier
+        body["service_tier"] = args.service_tier
 
     print(f"Creating task with model {args.model}...")
     result = api_request("POST", f"{BASE_URL}", body)
@@ -407,10 +409,10 @@ Environment variables:
     create_parser.add_argument("--audio", nargs="+", help="参考音频路径或URL")
     create_parser.add_argument("--draft-task-id", help="草稿任务ID（从草稿生成正式视频）")
     create_parser.add_argument("--prompt", "-p", help="文字提示词")
-    create_parser.add_argument("--model", "-m", default=DEFAULT_MODEL, help=f"模型ID（默认: {DEFAULT_MODEL}）")
+    create_parser.add_argument("--model", "-m", default=DEFAULT_MODEL, help=f"模型ID（默认: {DEFAULT_MODEL}，仅支持Seedance 2.0系列）")
     create_parser.add_argument("--ratio", default="16:9", help="画幅（1:1/16:9/4:3/9:16/21:9/adaptive）")
     create_parser.add_argument("--duration", type=int, default=5, help="视频时长（秒，4-15，或-1自动）")
-    create_parser.add_argument("--resolution", default="720p", help="分辨率（480p/720p/1080p）")
+    create_parser.add_argument("--resolution", default="480p", help="分辨率（480p/720p/1080p）")
     create_parser.add_argument("--seed", type=int, help="随机种子（-1=随机，用于复现）")
     create_parser.add_argument("--camera-fixed", type=parse_bool, help="固定镜头位置（true/false）")
     create_parser.add_argument("--watermark", type=parse_bool, default=True, help="添加水印（true/false，默认true）")
@@ -420,6 +422,7 @@ Environment variables:
     create_parser.add_argument("--service-tier", choices=["default", "flex"], help="服务层级（flex=离线便宜50%%）")
     create_parser.add_argument("--wait", "-w", action="store_true", help="等待生成完成")
     create_parser.add_argument("--download", help="下载到的本地路径")
+    create_parser.add_argument("--force", "-y", action="store_true", help="跳过确认步骤，直接执行（Agent 场景使用）")
     create_parser.set_defaults(func=cmd_create)
 
     status_parser = subparsers.add_parser("status", help="查询任务状态")

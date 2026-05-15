@@ -1,6 +1,6 @@
 ---
 name: seedance2.0-tool
-description: "调用 Volcengine Seedance 2.0 模型生成视频的 OpenClaw Skill。支持图片参考、视频参考、音频参考、文生视频等多种模式。通过 Chevereto 图床中转上传本地文件（绕过 Cloudflare 拦截），返回公网 URL 给 Seedance API。触发词：seedance、视频生成、seedance2.0、生成视频、视频模型、文生视频"
+description: "调用 Volcengine Seedance 2.0 模型生成视频的 OpenClaw Skill。⚠️ 仅使用 Seedance 2.0 系列模型（doubao-seedance-2-0-fast-260128 / doubao-seedance-2-0-260128），禁止使用 Seedance 1.0 系列模型。支持图片参考、视频参考、音频参考、文生视频等多种模式。通过 Chevereto 图床中转上传本地文件（绕过 Cloudflare 拦截），返回公网 URL 给 Seedance API。触发词：seedance、视频生成、seedance2.0、生成视频、视频模型、文生视频"
 ---
 
 # Seedance 2.0 Tool Skill
@@ -22,6 +22,21 @@ message(
 ```
 
 告知用户任务 ID 供追溯。
+
+### 结构化输出格式（执行后必须遵循）
+
+视频生成完成后，按以下格式输出执行结果：
+
+```
+## 视频生成结果
+- **任务ID**: cgt-xxx
+- **模型**: doubao-seedance-2-0-fast-260128
+- **时长**: 10s / 480p / 16:9
+- **风格**: <prompt中的风格描述>
+- **动作**: <主要动作描述>
+- **文件**: /path/to/video.mp4
+- **状态**: ✅ 生成完成
+```
 
 ## 环境准备
 
@@ -78,6 +93,11 @@ python3 seedance.py create \
 
 **用途**：保留视频动作，更换角色外观。角色A → 角色B，执行视频里同样的动作。
 
+> ✅ **执行前确认**：请确认你已提供：
+> - 角色参考图（`--ref-images`）：要出现的新角色外观
+> - 视频参考（`--video-refs`）：要模仿的动作编排
+> - 画幅和时长参数
+
 ```bash
 python3 seedance.py create \
   --ref-images ./character.png \
@@ -133,13 +153,19 @@ python3 seedance.py create \
 
 ### 模型控制
 
+> ⚠️ **模型限制**：本 skill **仅使用 Seedance 2.0 系列模型**，禁止使用 Seedance 1.0 系列模型。禁止使用 seedance-2-0-pro 系列模型。
+
 | 参数 | 说明 | 可选值 | 默认值 |
 |------|------|--------|--------|
-| `--model` | 模型 ID | `doubao-seedance-2-0-fast-260128`（Fast）/ `doubao-seedance-2-0-260128`（高质量） | `doubao-seedance-2-0-fast-260128` |
+| `--model` | 模型 ID | `doubao-seedance-2-0-fast-260128`（Fast，速度优先）/ `doubao-seedance-2-0-260128`（高质量，质量优先） | `doubao-seedance-2-0-fast-260128` |
 | `--ratio` | 画幅比例 | `16:9` / `4:3` / `1:1` / `3:4` / `9:16` / `21:9` / `adaptive` | `16:9`（⚠️ 使用视频参考时可能不生效） |
 | `--duration` | 视频时长（秒） | `4-15`，或 `-1`（模型自动判断） | `5` |
-| `--resolution` | 输出分辨率 | `480p` / `720p` / `1080p` | `720p` |
+| `--resolution` | 输出分辨率 | `480p` / `720p` / `1080p` | `480p` |
 | `--seed` | 随机种子 | 整数，`-1` 表示随机 | `-1` |
+
+> ⚠️ **首帧图生视频跳变**（画面拉伸/压缩）：将 `ratio` 设置为 `adaptive`，或将输入图片裁剪为与目标 ratio 一致的宽高比。
+
+> ⚠️ **视频 URL 有效期仅 24 小时**，超过需转存。推荐配置火山引擎 TOS 数据订阅自动转存。
 
 ### 高级参数
 
@@ -147,13 +173,13 @@ python3 seedance.py create \
 |------|------|------|
 | `--camera-fixed` | 固定镜头位置 | `true` / `false` |
 | `--watermark` | 添加水印 | `true`（默认）/ `false` |
-| `--generate-audio` | 生成音频 | `true` / `false` |
-| `--draft` | 草稿/预览模式（1.5 Pro） | `true` / `false` |
+| `--generate-audio` | 音视频联合生成（Seedance 2.0 原生能力） | `true` / `false` |
+| `--draft` | 草稿/预览模式 | `true` / `false` |
 | `--return-last-frame` | 返回尾帧图片 URL | `true` / `false` |
 | `--service-tier` | 服务层级 | `default`（在线）/ `flex`（离线，便宜 50%） |
-| `--frames` | 精确帧数（1.0 模型） | `25+4n`，范围 29-289 |
 | `--execution-expires-after` | 任务超时（秒） | `3600-259200` |
 | `--callback-url` | 回调 Webhook URL | `https://example.com/webhook` |
+| `tools: [{"type": "web_search"}]` | 联网搜索（仅纯文本模式） | 自动搜索互联网内容 |
 
 ### 执行控制
 
@@ -162,6 +188,7 @@ python3 seedance.py create \
 | `--wait` / `-w` | 创建后等待生成完成 |
 | `--interval` | 轮询间隔秒数（默认 15） |
 | `--download` | 下载目录（默认当前目录） |
+| `--force` / `-y` | 跳过确认步骤，直接执行。**Agent 场景专用**：当 Agent（game-keyframe 或其他调用方）已完成用户确认，可传此参数跳过 SKILL.md 中的确认步骤，直接调用 API 执行。允许多个 Agent 并发调用此参数 |
 
 ## 工作流程
 
@@ -239,13 +266,9 @@ python3 seedance.py status <task_id>
 
 # 等待任务完成
 python3 seedance.py wait <task_id> [--download ./dir]
-
-# 列出任务
-python3 seedance.py list [--status succeeded] [--page 1]
-
-# 删除任务
-python3 seedance.py delete <task_id>
 ```
+
+> ⚠️ `--list` / `--delete` 子命令尚未实现，如有需要请在 seedance.py 中补充。
 
 ## 技术细节
 
@@ -402,6 +425,7 @@ and action choreography, BGM references @Audio1, scene references @Image2
 | 错误 | 正确做法 |
 |------|---------|
 | 只说 `reference @Video1` 不说参考什么 | 明确说 `reference @Video1's camera movement` |
+| 使用生僻字、特殊符号 | 优先使用常用字，确保最佳呈现效果 |
 | 同时要求固定镜头+环绕镜头 | 同一片段只选一种 |
 | 5秒塞太多场景 | 确保物理上可行 |
 | 上传5张图但没给每张分配角色 | 每个 @reference 都要有明确用途 |
@@ -429,3 +453,91 @@ Sound: Reference @Audio1's background music, add product interaction sound effec
 ### 为什么用 curl 而非 urllib
 
 Cloudflare 会拦截来自数据中心 IP 的 urllib/requests 请求（ASN block 1010）。curl 来自用户环境，绕过此限制。
+
+## 批量生成模式
+
+当需要生成多个视频时，使用 JSON Spec 预检文件 + 批量执行脚本。
+
+### JSON Spec 文件格式
+
+每个视频任务对应一个 `.json` 文件：
+
+```json
+{
+  "prompt": "宇航员在太空中行走，漂浮感，电影质感",
+  "model": "doubao-seedance-2-0-fast-260128",
+  "duration": 10,
+  "ratio": "16:9",
+  "resolution": "480p",
+  "ref_images": [],
+  "video_refs": [],
+  "audio": [],
+  "output_name": "astronaut_walk"
+}
+```
+
+| 字段 | 类型 | 说明 | 默认值 |
+|------|------|------|--------|
+| `prompt` | string | 文字提示词 | — |
+| `model` | string | 模型 ID | `doubao-seedance-2-0-fast-260128` |
+| `duration` | int | 视频时长（秒，4-15） | `5` |
+| `ratio` | string | 画幅 | `16:9` |
+| `resolution` | string | 分辨率 | `480p` |
+| `ref_images` | string[] | 参考图片路径/URL | `[]` |
+| `video_refs` | string[] | 参考视频路径/URL | `[]` |
+| `audio` | string[] | 参考音频路径/URL | `[]` |
+| `output_name` | string | 输出文件名标识 | 文件名 |
+
+### 执行命令
+
+```bash
+# 批量执行（不等待每个任务完成，快速提交）
+python3 scripts/batch_generate.py tmp/batch_jobs/
+
+# 批量执行（等待每个任务完成）
+python3 scripts/batch_generate.py tmp/batch_jobs/ --wait
+
+# 仅预览命令，不实际执行
+python3 scripts/batch_generate.py tmp/batch_jobs/ --dry-run
+```
+
+### 执行流程
+
+1. 将多个 JSON Spec 文件放入一个目录（如 `tmp/batch_jobs/`）
+2. 运行 `batch_generate.py <目录>`
+3. 脚本依次读取每个 `.json` 文件，调用 seedance.py 执行
+4. 每个任务结果保存为 `<spec_name>.result.json`
+5. 汇总报告保存为 `batch_summary.json`
+
+### 结果文件格式
+
+每个任务执行后生成 `.result.json`：
+
+```json
+{
+  "spec_file": "tmp/batch_jobs/astronaut_walk.json",
+  "spec": { "prompt": "...", "duration": 10 },
+  "cmd": "python3 seedance.py create --prompt ...",
+  "status": "submitted",
+  "task_id": "cgt-xxx",
+  "error": null
+}
+```
+
+### 目录结构示例
+
+```
+tmp/batch_jobs/
+├── astronaut_walk.json       # Spec 文件 1
+├── astronaut_walk.result.json # 结果文件 1
+├── cat_playing.json         # Spec 文件 2
+├── cat_playing.result.json   # 结果文件 2
+└── batch_summary.json       # 汇总报告
+```
+
+### 注意事项
+
+- 本地文件（图片/视频/音频）会自动上传 Chevereto 图床
+- 任务提交后可在火山方舟控制台查看进度
+- 批量执行不等待，适合快速提交大量任务
+- 添加 `--wait` 会等待每个任务完成再执行下一个（耗时长）

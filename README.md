@@ -4,10 +4,12 @@
 
 ## 核心功能
 
-- 🎬 调用 Seedance 2.0 模型生成视频
+- 🎬 调用 Seedance **2.0** 模型生成视频
 - 🖼️ 支持图片参考、视频参考、音频参考
 - ✍️ 支持文生视频、图片生视频、动作模仿等多种模式
 - ☁️ 本地文件自动上传 Chevereto 图床（公网可访问）
+
+> ⚠️ **模型限制**：仅使用 Seedance 2.0 系列模型（`doubao-seedance-2-0-fast-260128` / `doubao-seedance-2-0-260128`），禁止使用 Seedance 1.0 系列和 2.0-pro 系列。
 
 ## 快速开始
 
@@ -54,19 +56,24 @@ python3 seedance.py create \
 | 参数 | 说明 | 默认值 |
 |------|------|--------|
 | `--prompt` / `-p` | 文字提示词 | - |
-| `--ref-images` | 参考图片（角色参考） | - |
-| `--video-refs` | 参考视频（本地文件自动上传） | - |
+| `--ref-images` | 参考图片（角色参考，role=reference_image） | - |
+| `--video-refs` | 参考视频（本地文件自动上传 Chevereto） | - |
 | `--image` / `-i` | 首帧图片 | - |
 | `--audio` | 参考音频 | - |
-| `--model` / `-m` | 模型 ID（Fast/高质量） | `doubao-seedance-2-0-fast-260128`（默认） |
-| `--duration` / `-d` | 时长（秒，4-15） | `5` |
+| `--model` / `-m` | 模型 ID | `doubao-seedance-2-0-fast-260128`（默认） |
+| `--duration` / `-d` | 时长（秒，**4-15**，或 `-1` 自动） | `5` |
 | `--ratio` | 画幅（16:9/4:3/1:1/3:4/9:16/21:9/adaptive） | `16:9` |
-| `--resolution` / `-r` | 分辨率（480p/720p/1080p） | `720p` |
+| `--resolution` / `-r` | 分辨率（480p/720p/1080p） | `480p` |
 | `--seed` | 随机种子（-1=随机） | `-1` |
 | `--watermark` | 添加水印 | `true` |
 | `--service-tier` | 服务层级（default/flex） | `default` |
 | `--wait` / `-w` | 等待生成完成 | - |
 | `--download` | 下载目录 | - |
+| `--force` / `-y` | 跳过确认步骤（Agent 场景专用） | - |
+
+## 已知问题
+
+> ⚠️ **duration 参数不生效（已验证）**：在纯文生视频场景下，`--duration` 参数实际不生效，API 固定返回 5 秒，`ratio` 也可能被覆盖。动作模仿（图片+视频参考）模式相对更稳定。如需更长视频，建议通过视频续接（Video Extension）方式分段生成。
 
 ## 命令
 
@@ -74,10 +81,6 @@ python3 seedance.py create \
 python3 seedance.py create [options]   # 创建任务
 python3 seedance.py status <task_id>   # 查询状态
 python3 seedance.py wait <task_id>     # 等待完成
-python3 seedance.py list [--status succeeded]  # 列出任务
-python3 seedance.py delete <task_id>   # 删除任务
 ```
 
-## License
-
-MIT
+> ⚠️ `--list` / `--delete` 子命令尚未实现。
