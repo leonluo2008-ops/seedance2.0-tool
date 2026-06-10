@@ -1,0 +1,17 @@
+[
+  {
+    "id": 1,
+    "prompt": "生成一个宇航员在太空中行走的视频，5秒，16:9",
+    "expected": "调用 create 子命令，使用 --prompt 文生视频模式，返回 task_id，视频下载到本地并发送给用户"
+  },
+  {
+    "id": 2,
+    "prompt": "用这张图生成视频，图片路径是 /tmp/hero.png，描述角色转身动作",
+    "expected": "调用 create --image 参数，识别为首帧控制模式，上传图片到 Chevereto，合成提示词，返回 task_id"
+  },
+  {
+    "id": 3,
+    "prompt": "让这只猫模仿视频里的动作，给我提供角色图 ./cat.png 和动作视频 ./dance.mp4",
+    "expected": "识别为动作模仿场景，同时传 --ref-images 和 --video-refs，上传两个本地文件到 Chevereto，prompt 使用 @Image1 和 @Video1 语法"
+  }
+]
