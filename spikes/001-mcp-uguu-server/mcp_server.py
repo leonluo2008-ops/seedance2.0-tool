@@ -24,6 +24,7 @@ import os
 import sys
 import json
 import time
+import asyncio
 import re
 import hashlib
 import urllib.request
@@ -215,7 +216,7 @@ def _get_ark_key() -> str:
 
 
 def _ark_request(method: str, url: str, data: dict = None, timeout: int = 60) -> dict:
-    """调火山引擎 API。"""
+    """调火山引擎 API（同步）。"""
     req = urllib.request.Request(url, method=method)
     req.add_header("Authorization", f"Bearer {_get_ark_key()}")
     req.add_header("Content-Type", "application/json")
@@ -224,6 +225,18 @@ def _ark_request(method: str, url: str, data: dict = None, timeout: int = 60) ->
         req.data = json.dumps(data).encode("utf-8")
     with urllib.request.urlopen(req, timeout=timeout, context=ssl.create_default_context()) as r:
         return json.loads(r.read().decode("utf-8"))
+
+
+# 别名：让 spike 003 测试能 asyncio.to_thread 包装
+_ark_request_sync = _ark_request
+
+
+async def _ark_request_async(method: str, url: str, data: dict = None, timeout: int = 60) -> dict:
+    """async 版本：把同步 urllib 跑在默认 executor（线程池），让事件循环不被阻塞。
+    适用场景：asyncio.gather 多个并发的 API 调用。"""
+    return await asyncio.get_event_loop().run_in_executor(
+        None, _ark_request, method, url, data, timeout
+    )
 
 
 def _build_content(args: dict) -> list:
