@@ -383,3 +383,150 @@ md5sum ./v1-clip*-fixed.mp4 /tmp/ark_batch/server_clip*.mp4 | sort
 - ✅ 批量提交后：`wc -l task_ids.txt` == 计划任务数
 - ✅ 每个 task 跑完 `wait` 后：`ls -lh` 校验文件存在
 - ✅ 交付前：所有 task `status` 都 succeeded（不是 failed / 不是 pending）
+
+---
+
+## 10. 批量并发调度（3 并发上限 + 异步等待模板）⭐ 2026-06-10 Hamster 8 段绘本实战沉淀
+
+> **触发场景**：绘本 8 段 / 漫剧 N 段 / 任何"批量跑 N 个 Clip"场景。**走串行 = 浪费时间**（绘本 8 段 18 分钟 vs 并发 7 分钟）。
+> **本节是"调度模式"而非红线**——违反不翻车，但**慢**。用户 2026-06-10 原话："**seedance 可以并发 3 个任务**"。
+
+### 10.1 并发上限
+
+| API 限制 | 值 | 来源 |
+|---|---|---|
+| **单用户最大并发任务数** | **3** | seedance 官方 API 限制（用户确认） |
+| **绘本单批建议并发数** | **3**（与官方上限对齐） | Hamster 8 段实战 3+2 拆分验证 |
+| **超出上限** | API 拒绝（429 / 任务排队延迟）| 实测 |
+
+**绘本 N 段拆分算法**：
+```python
+batches = [clips[i:i+3] for i in range(0, len(clips), 3)]
+# 例：8 段 → [[1,2,3], [4,5,6], [7,8]] = 3 批
+# 例：5 段 → [[1,2,3], [4,5]] = 2 批
+```
+
+### 10.2 异步等待可执行模板（execute_code + subprocess.Popen）⭐⭐⭐
+
+> **反模式 1**（最早我写的串行版）：`subprocess.run(... timeout=600)` —— 一个跑完才跑下一个 = 串行 = 慢
+> **反模式 2**：`subprocess.Popen(...) + sleep` —— 不知道何时完成 = race condition
+> **正解**：`subprocess.Popen` 启动 N 个进程 → `communicate()` **异步等所有** = 真并发
+
+**完整可执行模板**（Pic10 Hamster 8 段实战验证）：
+
+```python
+import subprocess
+import time
+import os
+
+# Step 1: 准备 clips 数据
+CLIPS = [
+    {'n': 4, 'img': '/path/4.jpg', 'duration': 6},
+    {'n': 5, 'img': '/path/5.jpg', 'duration': 6},
+    {'n': 6, 'img': '/path/6.jpg', 'duration': 7},
+    # 7, 8 走第 2 批（3 并发上限）
+]
+
+# Step 2: 错开 1 秒提交（避免 API 抖动）+ 用独立 download 路径
+procs = []
+for clip in CLIPS:
+    n = clip['n']
+    with open(f'/path/clip{n}-prompt.txt', 'r') as f:
+        prompt = f.read().strip()
+    output = f'/path/clip{n}.mp4'  # 独立路径（红线！同路径会互相覆盖）
+    cmd = ['python3', 'seedance.py', 'create',
+        '--ref-images', clip['img'],
+        '--prompt', prompt,
+        '--model', 'doubao-seedance-2-0-fast-260128',
+        '--ratio', '16:9', '--duration', str(clip['duration']),
+        '--resolution', '720P',
+        '--watermark', 'false', '--generate-audio', 'true',
+        '--wait', '--download', output]
+    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                         text=True, cwd='/home/luo/.hermes/profiles/huiben/skills/creative/seedance2.0-tool')
+    procs.append((n, p, time.time()))
+    time.sleep(1)  # 错开 1 秒避免 API 抖动
+
+# Step 3: 异步等待所有任务完成（不等任何一个先完成）
+results = []
+for n, p, t0 in procs:
+    try:
+        stdout, stderr = p.communicate(timeout=600)  # 单任务最长等 10 分钟
+    except subprocess.TimeoutExpired:
+        p.kill()
+        stdout, stderr = p.communicate()
+    elapsed = time.time() - t0
+    # 解析 task_id + seed + tokens
+    task_id = seed = tokens = None
+    for line in stdout.split('\n'):
+        if 'Task ID:' in line:
+            task_id = line.split('Task ID:')[1].strip()
+        if '"seed":' in line:
+            try: seed = int(line.split('"seed":')[1].split(',')[0].strip())
+            except: pass
+        if '"total_tokens":' in line:
+            try: tokens = int(line.split('"total_tokens":')[1].split('}')[0].strip())
+            except: pass
+    out_path = f'/path/clip{n}.mp4'
+    exists = os.path.exists(out_path)
+    size = os.path.getsize(out_path) if exists else 0
+    print(f"clip{n}: {task_id} seed={seed} tokens={tokens} 用时={elapsed:.1f}s 文件={size//1024}KB {'✅' if exists else '❌'}")
+    if not exists or p.returncode != 0:
+        print(f"  STDERR: {stderr[-500:]}")
+    results.append({'n': n, 'task_id': task_id, 'seed': seed, 'tokens': tokens,
+                    'elapsed': elapsed, 'size_kb': size//1024, 'exists': exists, 'returncode': p.returncode})
+```
+
+### 10.3 实战数据（Pic10 Hamster 8 段并发 vs 串行预估）
+
+| 调度模式 | 总耗时 | 时间效率 | 备注 |
+|---|---|---|---|
+| **串行预估** | ~18 分钟（5 × 223s 平均）| 100% | 假设 5 个 clip 都按 5s 算 |
+| **3+2 并发实测** | **7 分 18 秒**（223s + 213s）| **节省 11 分钟** | 第 1 批 3 个 / 第 2 批 2 个 |
+| 节省比例 | — | **~60% 时间节省** | 绘本 8 段级以上的批量场景必走并发 |
+
+### 10.4 ⚠️ 3 个红线（并发场景必避）
+
+> 这 3 条是 2026-06-10 Hamster 并发实战发现的"看起来没问题但会翻车"的陷阱：
+
+1. **❌ `--download` 路径冲突**（最致命）
+   - 所有任务传同一个 `--download /path/output` → 全部写入 `/path/output`（无扩展名）= 互相覆盖
+   - 修复：**每个任务用独立文件名** `--download /path/clip1.mp4` / `--download /path/clip2.mp4`
+   - 详见 SKILL.md "⚠️ 重要：`--download` 是「完整文件路径」" 红线
+
+2. **❌ 错开时间 < 1 秒**
+   - 3 个任务同毫秒级提交 → API 端可能触发频率限制（429 / 任务延迟）
+   - 修复：`time.sleep(1)` 错开 1 秒（实测稳定）
+
+3. **❌ execute_code 单次 timeout 太短**
+   - `subprocess.run(..., timeout=300)` 串行超时 = 任务跑超过 5 分钟就 false alarm
+   - `subprocess.Popen` + `communicate(timeout=600)` 单任务 10 分钟上限 = 安全
+   - 绘本 7s 1080P 实测 4-8 分钟；14s 复杂 prompt 实测 15-25 分钟
+
+### 10.5 task_id 持久化（并发场景版）
+
+并发跑多个任务时，**每个任务 ID 必须独立持久化**（不能靠 stdout 打印追）：
+
+```python
+# 启动时创建 task_ids 跟踪文件
+TRACKER = '/path/task_ids.tsv'
+import json
+with open(TRACKER, 'w') as f:
+    f.write('task_id\tclip_idx\tlocal_path\tcreated_at\tseed\ttokens\tsize_kb\n')
+
+# 每个任务完成后追加一行
+for r in results:
+    with open(TRACKER, 'a') as f:
+        f.write(f"{r['task_id']}\tclip{r['n']}\t/path/clip{r['n']}.mp4\t"
+                f"{time.strftime('%H:%M:%S')}\t{r['seed']}\t{r['tokens']}\t{r['size_kb']}\n")
+```
+
+**触发场景**：
+- 任何"批量跑 N 个 Clip"前（绘本 N 段 / 漫剧 N 段 / 多角度产品图 / 同主题多版本）
+- 用户明确说"批量" / "全部" / "所有 Clip" 时
+- 单测门 SOP（§6）跑完 1 个 Clip 用户确认后，进入批量阶段时
+
+**反模式**（必避）：
+- ❌ 走 `for ... subprocess.run` 串行 = 浪费时间（绘本 8 段从 7 分钟变 18 分钟）
+- ❌ 走 `subprocess.Popen + os.wait` 没存 task_id = 任务 ID 丢失（违反 §1 铁律 30）
+- ❌ 走 `nohup &` 后台 = 失去控制（违反 §1 铁律 30 + §2 铁律 29）
