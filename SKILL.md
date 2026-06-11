@@ -1,6 +1,6 @@
 ---
 name: seedance2.0-tool
-description: "调用 Volcengine Seedance 2.0 模型生成视频的 OpenClaw Skill。支持图片参考、视频参考、音频参考、文生视频等多种模式。通过 Chevereto 图床中转上传本地文件（绕过 Cloudflare 拦截），返回公网 URL 给 Seedance API。触发词：seedance、视频生成、seedance2.0、生成视频、视频模型、文生视频"
+description: "调用 Volcengine Seedance 2.0 模型生成视频的 skill。支持图片参考、视频参考、音频参考、文生视频等多种模式。通过 uguu.se 图床上传本地文件（替代原 chevereto，2026-06-11 spike 006 改造），返回公网 URL 给 Seedance API。CLI 入口：python3 seedance.py create / status / wait。MCP 入口：mcp_seedance_* 工具（自动注册）。触发词：seedance、视频生成、seedance2.0、生成视频、视频模型、文生视频"
 ---
 
 # Seedance 2.0 Tool Skill
@@ -11,8 +11,8 @@ description: "调用 Volcengine Seedance 2.0 模型生成视频的 OpenClaw Skil
 
 | 类别 | 参考文档 | 触发场景 |
 |------|---------|---------|
-| **API bug 修复**（4 个已知）| `references/audio-bugs-and-hosting.md` | duration 不生效 / audio role 缺失 / chevereto HTTP / BASE_URL 调试 |
-| **公网 URL 决策树** | `references/audio-bugs-and-hosting.md` §"mp3 音频必须走公网直链" | 绘本 BGM 上传选 uguu.se / chevereto / 飞书 |
+| **API bug 修复**（5 个已知）| `references/audio-bugs-and-hosting.md` | duration 不生效 / audio role 缺失 / 顶层 vs 嵌套 schema / BASE_URL 调试 / SSL EOF |
+| **公网 URL 决策树** | `references/audio-bugs-and-hosting.md` §"mp3 音频必须走公网直链" | 绘本 BGM 上传选 uguu.se / 飞书（**chevereto 已废 2026-06-11**）|
 | **官方文档研究 v1** | `references/seedance-official-docs-research-2026-06-04.md` | 找 v14 范式 / 5 条铁律 / v12 范式 5 根因 |
 | **官方文档研究 v2** ⭐ 2026-06-10 新增 | `references/seedance-official-docs-research-2026-06-10.md` | **镜头设计方法 + 好提示词写法专项**：分镜时序 4 逻辑 / 特殊字符规范 / 1 运镜红线 / 实战案例 / 按事件拆 / 情绪字典 / 延长画质劣化防御 |
 | **Pic8 Rabbit Clip4 实战沉淀** ⭐ 2026-06-10 | `references/2026-06-10-pic8-rabbit-clip4-cardio.md` | **BGM vs 音效红线** / **状态查询反模式**（updated_at ≠ 卡死）/ 20 分钟生成时长预期 / 调用链 bug 全景 / **§8 Rabbit 翻车全链**（v6 整段不分镜翻车 + 5s 5 镜头翻车 + v15 导演思维版验证）/ **§8.2 镜头数算法**（5s=2-3 / 12s=4-5 / 14s=5-6 实战验证）|

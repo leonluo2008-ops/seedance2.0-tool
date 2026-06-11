@@ -1,5 +1,7 @@
 # Spike 001: mcp-uguu-server
 
+> ⏰ **截至 2026-06-11 spike 001-005 全部完成**（含 spike 006 仓库重构：chevereto→uguu + 单真源 + 委托层瘦身）。本 README 顶部"spike 002 范围"小节描述的"后续要做"全部已落地。
+
 ## 问题
 
 把 `seedance2.0-tool` skill（Python CLI）封装成 MCP server，让所有 agent（huiben / drama / account-ops）能通过 `mcp_seedance_*` 工具调用视频生成。

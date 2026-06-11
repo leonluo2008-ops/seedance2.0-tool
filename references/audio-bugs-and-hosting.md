@@ -1,4 +1,10 @@
-# 音频相关错误（2026-06-04 沉淀 · 必读）⭐⭐⭐
+# 音频相关错误（2026-04 沉淀 · 必读）⭐⭐⭐
+
+> ⚠️ **本文件中的 chevereto 章节（Bug 2 / 二次上传 / 音频）已废弃**（spike 006 · 2026-06-11）：
+> - chevereto 图床已**全量**替换为 uguu.se（匿名、无 key、白名单不限）
+> - seedance.py 内部上传函数 = `seedance_uploads.upload_to_uguu`
+> - **保留**这些章节作为**历史**（Bug 2 的 http→https 修复仍通用 / Bug 4 的 duration 顶层 schema 仍适用）
+> - **不**再适用于"修复 chevereto"为目的的实操——**改用 uguu.se**
 
 ## 关键背景：seedance.py 请求体 schema（2026-06-04 实测踩坑后强制规范）
 

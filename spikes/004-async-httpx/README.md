@@ -1,5 +1,7 @@
 # spike 004: httpx.AsyncClient 真异步改造
 
+> ⏰ **截至 2026-06-11 spike 004 + 006 全部完成**（含 spike 006 委托层瘦身：mcp_server.py 业务函数委托给 seedance_uploads.py）。本文档 line 引用已不准（委托后行号变化），仅作历史决策记录。
+
 > **For Hermes:** 本 spike 是单文件重写（mcp_server.py 改 ~5 个调用点），不分 subagent 派发，自己干 + 频繁 commit。
 
 ## 目标
