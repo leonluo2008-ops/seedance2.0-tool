@@ -267,7 +267,7 @@ ffmpeg -y -sseof -0.1 -i input.mp4 -vframes 1 frame_end.jpg
 
 | 变量 | 用途 | 示例值 |
 |------|------|--------|
-| `${ENV:ARK_API_KEY}` | provider 鉴权 | `3149...` |
+| `${ENV:ARK_API_KEY}` | provider 鉴权 | `***`（填真值，**不**进 git / 文档）|
 | `${ENV:SEEDANCE_BASE_URL}` | API endpoint | `https://ark.cn-beijing.volces.com/api/v3/...` |
 | `${ENV:SEEDANCE_CACHE_DIR}` | 本地任务缓存目录 | `${HOME}/.cache/seedance-mcp` |
 | `${ENV:FILE_HOST}` | 本地文件上传服务 | `uguu.se` / `0x0.st` / 自建 |

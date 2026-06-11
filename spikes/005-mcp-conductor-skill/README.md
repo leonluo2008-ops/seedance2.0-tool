@@ -1,5 +1,7 @@
 # Spike 005: mcp-conductor-skill
 
+> ⏰ **截至 2026-06-11 spike 001-006 全部完成**。本 skill `seedance-mcp-conductor` v0.1 已在 `~/.hermes/skills/creative/seedance-mcp-conductor`（symlink 到本目录）。
+
 ## 问题
 
 `spike 001-004` 完成了 MCP server 本身（6 工具 + 异步 + 任务管理 + e2e 验证）。
@@ -58,10 +60,10 @@ skill 实际安装位置（symlink 到 spike 目录）：
 
 ```bash
 # 真源（在 seedance2.0-tool 仓库内）
-~/.hermes/profiles/huiben/skills/creative/seedance2.0-tool/spikes/005-mcp-conductor-skill/SKILL.md
+${REPO_ROOT}/spikes/005-mcp-conductor-skill/SKILL.md
 
-# 安装位置（symlink）
-~/.hermes/skills/creative/seedance-mcp-conductor → 上面真源
+# 安装位置（symlink → 真源）
+~/.hermes/skills/creative/seedance-mcp-conductor
 ```
 
 **为什么 symlink**：单真源，跟 MCP server 源码同仓库管理（红线 4 = 独立仓库不混）。
