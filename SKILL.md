@@ -899,11 +899,13 @@ python3 /home/luo/.hermes/profiles/huiben/skills/creative/seedance2.0-tool/seeda
 # 创建视频任务
 python3 seedance.py create [options]
 
-# 查询任务状态
+# 查询任务状态（位置参数 + --task-id flag 别名 · v1.0.5+pic18 Banana #1 修复）
 python3 seedance.py status <task_id>
+python3 seedance.py status --task-id <task_id>  # flag 模式（向后兼容老脚本）
 
 # 等待任务完成
 python3 seedance.py wait <task_id> [--download <path>]
+python3 seedance.py wait --task-id <task_id> [--download <path>]  # flag 模式
 ```
 
 > ⚠️ **CLI 缺失 list/delete**：SKILL.md 历史版本提到过 `list` 和 `delete` 子命令，但实际 CLI（v1.0.44）只有 `create/status/wait` 三个。任务列表**无法用 CLI 查**。
@@ -955,7 +957,7 @@ EOF
 > 3. 看到 `status=succeeded` 立即读 `content.video_url` + 下载（24h 过期）
 >
 > **反模式（铁律）**：
-> - ❌ 用 `seedance.py status <task_id>` + shell 管道 → 状态字段可能截断
+> - ❌ 用 `seedance.py status <task_id>` 或 `seedance.py status --task-id <task_id>` + shell 管道 → 状态字段可能截断
 > - ❌ 用 `--wait` 阻塞 180s/600s → 强制 timeout = 假阳性"失败"
 > - ❌ 看 `updated_at` 没动就报"卡死" → 真假阳性反复出错
 > - ✅ 唯一信源：`status` 字段 + 24h 内的 video_url

@@ -363,15 +363,23 @@ def cmd_create(args):
 
 
 def cmd_status(args):
-    """查询任务状态"""
-    result = api_request("GET", f"{BASE_URL}/{args.task_id}")
+    """查询任务状态（支持位置参数 + --task-id flag 别名 · v1.0.5+pic18 Banana #1 修复）"""
+    # 合并位置参数和 --task-id flag（两者都支持，向后兼容老脚本）
+    task_id = args.task_id or args.task_id_pos
+    if not task_id:
+        sys.exit("Error: 必须提供 task_id（位置参数或 --task-id flag）", )
+    result = api_request("GET", f"{BASE_URL}/{task_id}")
     print(json.dumps(result, indent=2, ensure_ascii=False))
 
 
 def cmd_wait(args):
-    """等待任务完成并下载"""
-    print(f"Waiting for task {args.task_id}...")
-    result = wait_for_completion(args.task_id)
+    """等待任务完成并下载（支持位置参数 + --task-id flag 别名 · v1.0.5+pic18 Banana #1 修复）"""
+    # 合并位置参数和 --task-id flag
+    task_id = args.task_id or args.task_id_pos
+    if not task_id:
+        sys.exit("Error: 必须提供 task_id（位置参数或 --task-id flag）")
+    print(f"Waiting for task {task_id}...")
+    result = wait_for_completion(task_id)
 
     if args.download:
         video_url = result.get("content", {}).get("video_url")
@@ -433,11 +441,13 @@ Environment variables:
     create_parser.set_defaults(func=cmd_create)
 
     status_parser = subparsers.add_parser("status", help="查询任务状态")
-    status_parser.add_argument("task_id", help="任务ID")
+    status_parser.add_argument("task_id_pos", nargs="?", default=None, help="任务ID（位置参数，向后兼容）")
+    status_parser.add_argument("--task-id", dest="task_id", default=None, help="任务ID（--task-id flag 别名，向后兼容老脚本 · v1.0.5+pic18 Banana 报告 #1 修复）")
     status_parser.set_defaults(func=cmd_status)
 
     wait_parser = subparsers.add_parser("wait", help="等待任务完成")
-    wait_parser.add_argument("task_id", help="任务ID")
+    wait_parser.add_argument("task_id_pos", nargs="?", default=None, help="任务ID（位置参数，向后兼容）")
+    wait_parser.add_argument("--task-id", dest="task_id", default=None, help="任务ID（--task-id flag 别名，向后兼容老脚本 · v1.0.5+pic18 Banana 报告 #1 修复）")
     wait_parser.add_argument("--download", help="下载到的本地路径")
     wait_parser.set_defaults(func=cmd_wait)
 
