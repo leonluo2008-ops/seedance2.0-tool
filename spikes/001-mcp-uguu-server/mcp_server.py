@@ -30,6 +30,7 @@ import hashlib
 import urllib.request
 import ssl
 import subprocess
+import httpx
 from pathlib import Path
 from typing import Any
 
@@ -196,7 +197,7 @@ def _upload_to_uguu(local_path: str, mime_type: str) -> str:
 
 
 def _resolve_url(input_str: str, kind: str) -> str:
-    """解析输入：URL 直返，本地路径上传 uguu。
+    """解析输入：URL 直返，本地路径上传 uguu（同步，保留兼容）。
     kind: image / video / audio
     """
     if input_str.startswith(("http://", "https://", "data:")):
@@ -205,6 +206,104 @@ def _resolve_url(input_str: str, kind: str) -> str:
     ext = Path(input_str).suffix.lower()
     mime = _MIME_BY_EXT.get(ext, f"application/octet-stream")
     return _upload_to_uguu(input_str, mime)
+
+
+async def _upload_to_uguu_async(local_path: str, mime_type: str) -> str:
+    """异步版 uguu 上传（spike 004：用 httpx 替代 urllib + subprocess）。
+
+    跟 _upload_to_uguu 行为一致：
+    - 任何类型 mime 都行（uguu 没 chevereto 白名单）
+    - 单文件 100MB 上限
+    - 返回 n.uguu.se 永久公网直链
+    """
+    p = Path(local_path)
+    if not p.exists():
+        raise FileNotFoundError(f"file not found: {local_path}")
+
+    file_size = p.stat().st_size
+    if file_size > 100 * 1024 * 1024:
+        raise ValueError(f"file too large ({file_size/1024/1024:.1f}MB), uguu limit 100MB")
+
+    with open(p, "rb") as f:
+        file_data = f.read()
+
+    boundary = "----hermesmcpboundary"
+    parts = [
+        f"--{boundary}\r\n".encode(),
+        f'Content-Disposition: form-data; name="files[]"; filename="{p.name}"\r\n'.encode(),
+        f"Content-Type: {mime_type}\r\n\r\n".encode(),
+        file_data, b"\r\n",
+        f"--{boundary}--\r\n".encode(),
+    ]
+    body = b"".join(parts)
+
+    client = await _get_http_client()
+    try:
+        resp = await client.post(
+            UGUU_UPLOAD_URL,
+            content=body,
+            headers={
+                "Content-Type": f"multipart/form-data; boundary={boundary}",
+                "User-Agent": "curl/8.0",  # 沿用 sync 版的 UA（uguu 识别）
+            },
+            timeout=120,
+        )
+        resp.raise_for_status()
+        result = resp.json()
+    except httpx.HTTPStatusError as e:
+        raise RuntimeError(f"uguu upload HTTP {e.response.status_code}: {e.response.text[:200]}")
+    except httpx.TimeoutException as e:
+        raise RuntimeError(f"uguu upload timeout: {e}")
+    except httpx.RequestError as e:
+        raise RuntimeError(f"uguu upload request error: {e}")
+
+    if not result.get("success"):
+        raise RuntimeError(f"uguu upload failed: {result}")
+    return result["files"][0]["url"]
+
+
+async def _resolve_url_async(input_str: str, kind: str) -> str:
+    """解析输入（异步版）：URL 直返，本地路径 async 上传 uguu。
+    kind: image / video / audio
+    """
+    if input_str.startswith(("http://", "https://", "data:")):
+        return input_str
+    ext = Path(input_str).suffix.lower()
+    mime = _MIME_BY_EXT.get(ext, f"application/octet-stream")
+    return await _upload_to_uguu_async(input_str, mime)
+
+
+async def _resolve_all_inputs_async(args: dict) -> dict:
+    """并发上传所有本地文件到 uguu，返回 {原始 input_str: uguu_url} 映射。
+    已经被 _build_content 内部用，**不**阻塞事件循环。
+    """
+    # 收集所有需要上传的本地路径（URL 直接跳过）
+    paths_to_upload = []
+    for key, kind in [
+        ("ref_images", "image"),
+        ("image", "image"),
+        ("last_frame", "image"),
+        ("video_refs", "video"),
+        ("audio_refs", "audio"),
+    ]:
+        v = args.get(key)
+        if not v:
+            continue
+        items = v if isinstance(v, list) else [v]
+        for item in items:
+            if not item.startswith(("http://", "https://", "data:")):
+                paths_to_upload.append((item, kind))
+
+    if not paths_to_upload:
+        return {}
+
+    # 并发上传（不同路径可并行；同一路径 dedup）
+    seen = {}
+    unique = list({p: k for p, k in paths_to_upload}.items())
+    results = await asyncio.gather(*[_resolve_url_async(p, k) for p, k in unique])
+    for (p, k), url in zip(unique, results):
+        seen[p] = url
+    return seen
 
 
 # ===== 火山引擎 API =====
@@ -216,7 +315,7 @@ def _get_ark_key() -> str:
 
 
 def _ark_request(method: str, url: str, data: dict = None, timeout: int = 60) -> dict:
-    """调火山引擎 API（同步）。"""
+    """调火山引擎 API（同步，保留兼容）。"""
     req = urllib.request.Request(url, method=method)
     req.add_header("Authorization", f"Bearer {_get_ark_key()}")
     req.add_header("Content-Type", "application/json")
@@ -227,22 +326,76 @@ def _ark_request(method: str, url: str, data: dict = None, timeout: int = 60) ->
         return json.loads(r.read().decode("utf-8"))
 
 
-# 别名：让 spike 003 测试能 asyncio.to_thread 包装
+# 别名 + 常驻 httpx 客户端（spike 004：真异步 IO）
 _ark_request_sync = _ark_request
+_http_client: "httpx.AsyncClient | None" = None
+
+
+async def _get_http_client() -> httpx.AsyncClient:
+    """懒加载 httpx 客户端（MCP server 常驻，**不**每个请求新建）。"""
+    global _http_client
+    if _http_client is None:
+        _http_client = httpx.AsyncClient(
+            timeout=httpx.Timeout(timeout=60.0, connect=10.0),
+            headers={"User-Agent": UA},
+        )
+    return _http_client
 
 
 async def _ark_request_async(method: str, url: str, data: dict = None, timeout: int = 60) -> dict:
-    """async 版本：把同步 urllib 跑在默认 executor（线程池），让事件循环不被阻塞。
-    适用场景：asyncio.gather 多个并发的 API 调用。"""
-    return await asyncio.get_event_loop().run_in_executor(
-        None, _ark_request, method, url, data, timeout
-    )
+    """异步版调火山引擎 API（httpx）。
+
+    跟同步版 _ark_request 行为一致：
+    - Authorization Bearer ARK_API_KEY
+    - Content-Type application/json
+    - 失败抛 RuntimeError（不 sys.exit，因为 call_tool 顶层 except）
+    """
+    client = await _get_http_client()
+    headers = {
+        "Authorization": f"Bearer {_get_ark_key()}",
+        "Content-Type": "application/json",
+    }
+    try:
+        resp = await client.request(
+            method, url,
+            json=data,  # httpx 自动 json 序列化（替代手动 json.dumps）
+            headers=headers,
+            timeout=timeout,
+        )
+        resp.raise_for_status()
+        return resp.json()
+    except httpx.HTTPStatusError as e:
+        body = e.response.text[:500] if e.response else ""
+        try:
+            err = e.response.json().get("error", {}).get("message", body)
+        except Exception:
+            err = body
+        raise RuntimeError(f"API Error (HTTP {e.response.status_code}): {err}")
+    except httpx.TimeoutException as e:
+        raise RuntimeError(f"API timeout after {timeout}s: {e}")
+    except httpx.RequestError as e:
+        raise RuntimeError(f"API request error: {e}")
 
 
-def _build_content(args: dict) -> list:
+def _build_content(args: dict, resolved_urls: dict = None) -> list:
     """从 MCP 工具入参构建 Ark content 数组。
     复刻 seedance.py cmd_create 的 content 构造逻辑。
+
+    resolved_urls: dict，key 是原始 input_str（路径或 URL），value 是已上传的 uguu URL
+                   —— 让 call_tool 异步上传完后传进来，避免 _build_content 内部 IO 阻塞
     """
+    resolved_urls = resolved_urls or {}
+
+    def _r(input_str: str, kind: str) -> str:
+        """从 resolved_urls 取已上传 URL；缺失则回退到 input_str（**仅**对已是 URL 的情况）"""
+        if input_str in resolved_urls:
+            return resolved_urls[input_str]
+        # ⚠️ 兜底：传入的 resolved_urls 漏了，但 input_str 是 URL（不会触发 uguu）
+        if input_str.startswith(("http://", "https://", "data:")):
+            return input_str
+        # 这种情况应该是 call_tool 漏上传，**不**兜底（让用户看到错误）
+        raise RuntimeError(f"resolved_urls 缺 {input_str}（{kind}），call_tool 必须先上传")
+
     content = []
 
     if args.get("draft_task_id"):
@@ -254,34 +407,34 @@ def _build_content(args: dict) -> list:
         for img in args.get("ref_images") or []:
             content.append({
                 "type": "image_url",
-                "image_url": {"url": _resolve_url(img, "image")},
+                "image_url": {"url": _r(img, "image")},
                 "role": "reference_image",
             })
 
         if args.get("image"):
             content.append({
                 "type": "image_url",
-                "image_url": {"url": _resolve_url(args["image"], "image")},
+                "image_url": {"url": _r(args["image"], "image")},
                 "role": "first_frame",
             })
         if args.get("last_frame"):
             content.append({
                 "type": "image_url",
-                "image_url": {"url": _resolve_url(args["last_frame"], "image")},
+                "image_url": {"url": _r(args["last_frame"], "image")},
                 "role": "last_frame",
             })
 
         for vid in args.get("video_refs") or []:
             content.append({
                 "type": "video_url",
-                "video_url": {"url": _resolve_url(vid, "video")},
+                "video_url": {"url": _r(vid, "video")},
                 "role": "reference_video",
             })
 
         for aud in args.get("audio_refs") or []:
             content.append({
                 "type": "audio_url",
-                "audio_url": {"url": _resolve_url(aud, "audio")},
+                "audio_url": {"url": _r(aud, "audio")},
                 "role": "reference_audio",
             })
 
@@ -290,13 +443,15 @@ def _build_content(args: dict) -> list:
     return content
 
 
-def _build_body(args: dict) -> dict:
+def _build_body(args: dict, resolved_urls: dict = None) -> dict:
     """构建 Ark API 请求体。复刻 seedance.py cmd_create 的 body 构造。
     关键差异：duration 默认 5（绘本场景推荐）；watermark 默认 false（绘本场景专精）
+
+    resolved_urls: 透传给 _build_content（避免重复上传）
     """
     body = {
         "model": args.get("model", DEFAULT_MODEL),
-        "content": _build_content(args),
+        "content": _build_content(args, resolved_urls=resolved_urls),
         "duration": args["duration"],
         "ratio": args.get("ratio", "16:9"),
     }
@@ -478,8 +633,10 @@ async def list_tools() -> list[types.Tool]:
 async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
     try:
         if name == "generate_video":
-            body = _build_body(arguments)
-            result = _ark_request("POST", ARK_BASE_URL, body, timeout=60)
+            # ⚠️ 先并发上传所有本地文件到 uguu（spike 004：真异步）
+            resolved_urls = await _resolve_all_inputs_async(arguments)
+            body = _build_body(arguments, resolved_urls=resolved_urls)
+            result = await _ark_request_async("POST", ARK_BASE_URL, body, timeout=60)
             task_id = result.get("id")
             if not task_id:
                 raise RuntimeError(f"no task_id in response: {result}")
@@ -507,7 +664,7 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
 
         elif name == "check_task":
             task_id = arguments["task_id"]
-            result = _ark_request("GET", f"{ARK_BASE_URL}/{task_id}", timeout=30)
+            result = await _ark_request_async("GET", f"{ARK_BASE_URL}/{task_id}", timeout=30)
             # 标准化输出
             out = {
                 "task_id": task_id,
@@ -544,16 +701,17 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
             deadline = time.time() + timeout
 
             while time.time() < deadline:
-                result = _ark_request("GET", f"{ARK_BASE_URL}/{task_id}", timeout=30)
+                result = await _ark_request_async("GET", f"{ARK_BASE_URL}/{task_id}", timeout=30)
                 status = result.get("status")
                 if status == "succeeded":
                     video_url = result.get("content", {}).get("video_url")
                     if not video_url:
                         raise RuntimeError(f"succeeded but no video_url: {result}")
-                    # 下载
-                    req = urllib.request.Request(video_url, headers={"User-Agent": UA})
-                    with urllib.request.urlopen(req, timeout=120, context=ssl.create_default_context()) as r:
-                        data = r.read()
+                    # 下载（用 httpx async，替代 sync urllib）
+                    client = await _get_http_client()
+                    dl_resp = await client.get(video_url, timeout=120)
+                    dl_resp.raise_for_status()
+                    data = dl_resp.content
                     out_p = Path(output_path)
                     out_p.parent.mkdir(parents=True, exist_ok=True)
                     with open(out_p, "wb") as f:
@@ -592,7 +750,7 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
         elif name == "verify_api_key":
             # ⚠️ 官方 list 端点参数是 page_size（不是 limit）—— 来源：api-connection-check.md 方法 A
             try:
-                result = _ark_request("GET", f"{ARK_BASE_URL}?page_size=1", timeout=15)
+                result = await _ark_request_async("GET", f"{ARK_BASE_URL}?page_size=1", timeout=15)
                 return [types.TextContent(type="text", text=json.dumps({
                     "valid": True,
                     "key_prefix": _get_ark_key()[:8] + "...",
@@ -634,7 +792,7 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
 
             # fallback：如果缓存没有 / URL 已过期 → 调 check_task 拿新 URL
             if not video_url or url_expired:
-                result = _ark_request("GET", f"{ARK_BASE_URL}/{task_id}", timeout=30)
+                result = await _ark_request_async("GET", f"{ARK_BASE_URL}/{task_id}", timeout=30)
                 video_url = result.get("content", {}).get("video_url")
                 if not video_url:
                     raise RuntimeError(f"task {task_id} 无 video_url（可能仍 running/failed: {result.get('status')}）")
@@ -651,10 +809,11 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
             else:
                 fallback_used = False
 
-            # 下载
-            req = urllib.request.Request(video_url, headers={"User-Agent": UA})
-            with urllib.request.urlopen(req, timeout=120, context=ssl.create_default_context()) as r:
-                data = r.read()
+            # 下载（用 httpx async，替代 sync urllib）
+            client = await _get_http_client()
+            dl_resp = await client.get(video_url, timeout=120)
+            dl_resp.raise_for_status()
+            data = dl_resp.content
             out_p = Path(output_path)
             out_p.parent.mkdir(parents=True, exist_ok=True)
             with open(out_p, "wb") as f:
