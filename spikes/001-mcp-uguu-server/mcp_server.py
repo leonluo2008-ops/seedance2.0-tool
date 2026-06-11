@@ -24,12 +24,104 @@ import os
 import sys
 import json
 import time
+import re
 import hashlib
 import urllib.request
 import ssl
 import subprocess
 from pathlib import Path
 from typing import Any
+
+# ===== 任务本地缓存（铁律 30 升级：append-only JSONL + 平台 URL TTL 同步）=====
+# 缓存文件位置：MCP server 持久目录，跨 session/重启可查
+# 写入时机：generate_video 成功 / check_task 拿到 succeeded / wait_and_download 完成
+# TTL 策略：从 video_url 的 X-Tos-Expires 字段读，**不**硬编码 24h（未来平台改 1h 自动适配）
+CACHE_DIR = Path(os.environ.get("SEEDANCE_CACHE_DIR", "/home/luo/.cache/seedance-mcp"))
+CACHE_FILE = CACHE_DIR / "tasks.jsonl"
+CACHE_TTL_FALLBACK_SEC = 24 * 3600  # 平台 URL TTL 字段缺失时的兜底（24h）
+
+
+def _ensure_cache_dir():
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _parse_url_expires(video_url: str) -> int:
+    """从 video_url query string 解析 X-Tos-Expires（秒）。
+    失败时返回 fallback 24h。"""
+    if not video_url:
+        return CACHE_TTL_FALLBACK_SEC
+    m = re.search(r'X-Tos-Expires=(\d+)', video_url)
+    if m:
+        try:
+            return int(m.group(1) or 0) or CACHE_TTL_FALLBACK_SEC
+        except (ValueError, TypeError):
+            pass
+    return CACHE_TTL_FALLBACK_SEC
+
+
+def _cache_task(task_id: str, status: str, video_url: "str | None" = None, **extra):
+    """写一条任务到本地 JSONL 缓存。
+    字段：task_id / status / video_url / url_ttl_sec / cached_at / url_expires_at / extras
+    """
+    _ensure_cache_dir()
+    now = int(time.time())
+    record = {
+        "task_id": task_id,
+        "status": status,
+        "cached_at": now,
+        "cached_at_iso": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now)),
+        **extra,
+    }
+    if video_url:
+        ttl = _parse_url_expires(video_url)
+        record["video_url"] = video_url
+        record["url_ttl_sec"] = ttl
+        record["url_expires_at"] = now + ttl
+        record["url_expires_at_iso"] = time.strftime(
+            "%Y-%m-%dT%H:%M:%SZ", time.gmtime(now + ttl)
+        )
+    # append-only, 一行一记录
+    with open(CACHE_FILE, "a", encoding="utf-8") as f:
+        f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    return record
+
+
+def _read_cache(limit: int = 50) -> list:
+    """读本地缓存（最新 limit 条）。相同 task_id 取最后一条（去重）。"""
+    if not CACHE_FILE.exists():
+        return []
+    seen = {}
+    with open(CACHE_FILE, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            seen[rec["task_id"]] = rec
+    # 按 cached_at 倒序
+    return sorted(seen.values(), key=lambda r: r.get("cached_at", 0), reverse=True)[:limit]
+
+
+def _check_url_expired(video_url: str) -> bool:
+    """检查 video_url 是否已过期（用本地时间，不调 API）。"""
+    if not video_url:
+        return True
+    ttl = _parse_url_expires(video_url)
+    # video_url 里的 X-Tos-Date 是签名时刻，但我们关心"现在距离签名过了多久"
+    # 简化：直接比较 ttl 秒数（保守——如果签发到现在已超 ttl，就当过期）
+    # 实际更准应该用 X-Tos-Date + X-Tos-Expires
+    m_date = re.search(r'X-Tos-Date=(\d{8}T\d{6}Z)', video_url)
+    if m_date:
+        try:
+            signed_at = time.mktime(time.strptime(m_date.group(1), "%Y%m%dT%H%M%SZ"))
+            return (time.time() - signed_at) > ttl
+        except ValueError:
+            pass
+    # 兜底：保守认为已过期
+    return True
 
 # mcp SDK
 from mcp.server import Server
@@ -195,10 +287,19 @@ def _build_body(args: dict) -> dict:
         "duration": args["duration"],
         "ratio": args.get("ratio", "16:9"),
     }
-    if args.get("watermark") is not None:
-        body["watermark"] = args["watermark"]
-    if args.get("generate_audio") is not None:
+    # watermark 字符串枚举 → API bool 字段映射
+    # 'none' / 'platform' → false（不加 AI 水印）
+    # 'seedance_ai' → true（加 Seedance 官方 AI 标识）
+    watermark = args.get("watermark", "none")
+    if watermark == "seedance_ai":
+        body["watermark"] = True
+    elif watermark in ("none", "platform"):
+        body["watermark"] = False
+    # generate_audio 绘本默认 false（避免莫名说话声）
+    if "generate_audio" in args:
         body["generate_audio"] = args["generate_audio"]
+    else:
+        body["generate_audio"] = False  # 绘本场景默认
     if args.get("resolution"):
         body["resolution"] = args["resolution"]
 
@@ -223,9 +324,24 @@ async def list_tools() -> list[types.Tool]:
         types.Tool(
             name="generate_video",
             description=(
-                "提交 Seedance 2.0 视频生成任务，立即返回 task_id。\n"
-                "已发任务 = 已扣费，绝不重提交。\n"
-                "推荐用 wait_and_download 同步等待。"
+                "提交 Seedance 2.0 视频生成任务，立即返回 task_id。"
+                "已发任务 = 已扣费，绝不重提交。推荐用 wait_and_download 同步等待。\n\n"
+                "[绘本/动画场景推荐参数]\n"
+                "  - watermark: 'none'（默认，无 AI 水印）\n"
+                "  - duration: 按镜头数算法（5s=2-3 镜 / 8s=3-4 镜 / 12s=4-5 镜 / 14s=5-6 镜）\n"
+                "  - ratio: '16:9'（横屏绘本）/ '9:16'（抖音/小红书竖屏）\n"
+                "  - generate_audio: false（绘本默认无 BGM，避免莫名说话声）\n"
+                "  - prompt: 必带末尾约束段（无人声/无歌唱/无配音/无朗读）\n"
+                "  - 多图参考用 ref_images（不 image+last_frame，绘本首尾帧范式禁用）\n\n"
+                "[通用/社媒场景推荐参数]\n"
+                "  - watermark: 'platform'（不加 AI 水印，自己后期加平台水印）\n"
+                "  - duration: 8-12s（社媒最佳）\n"
+                "  - ratio: '9:16'（抖音/小红书）/ '1:1'（朋友圈）\n"
+                "  - generate_audio: 默认即可（社媒视频通常自带 BGM）\n\n"
+                "⚠️ 硬限制\n"
+                "  - duration 必在 [4, 15]（API 拒绝范围外）\n"
+                "  - duration 必为整数（避开 argparse '7.5' → invalid int 老坑）\n"
+                "  - 已发任务 = 已扣费，绝不重提交同 task_id"
             ),
             inputSchema={
                 "type": "object",
@@ -240,15 +356,30 @@ async def list_tools() -> list[types.Tool]:
                     "audio_refs": {"type": "array", "items": {"type": "string"},
                                    "description": "参考音频（绘本 BGM）"},
                     "duration": {"type": "integer", "minimum": 4, "maximum": 15,
-                                 "description": "API 硬限制 [4,15] 秒。-1 = 自动"},
+                                 "description": "API 硬限制 [4,15] 秒。绘本按镜头数算法选（5s=2-3 / 8s=3-4 / 12s=4-5 / 14s=5-6）"},
                     "ratio": {"type": "string", "enum": ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9", "adaptive"],
-                              "default": "16:9"},
-                    "watermark": {"type": "boolean", "default": False,
-                                  "description": "绘本场景必传 false（默认 false）"},
-                    "resolution": {"type": "string", "enum": ["480p", "720p", "1080p"], "default": "720p"},
+                              "default": "16:9",
+                              "description": "画幅。绘本 16:9 / 抖音 9:16 / 朋友圈 1:1"},
+                    "watermark": {
+                        "type": "string",
+                        "enum": ["none", "platform", "seedance_ai"],
+                        "default": "none",
+                        "description": (
+                            "水印策略：\n"
+                            "  - 'none'（默认，绘本/动画）— 不加任何水印\n"
+                            "  - 'platform'（通用/社媒）— 不加 AI 水印，自己后期加平台水印\n"
+                            "  - 'seedance_ai'（测试/审计）— 加 Seedance 官方 AI 标识"
+                        ),
+                    },
+                    "generate_audio": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "绘本场景必传 false（避免莫名说话声）；社媒场景可不传（默认走模型策略）",
+                    },
+                    "resolution": {"type": "string", "enum": ["480p", "720p", "1080p"], "default": "720p",
+                                   "description": "spike 用 480p 省钱；生产用 720p"},
                     "model": {"type": "string", "default": DEFAULT_MODEL,
                               "description": "doubao-seedance-2-0-fast（默认）/ doubao-seedance-2-0（高质量慢）"},
-                    "generate_audio": {"type": "boolean"},
                     "seed": {"type": "integer", "description": "随机种子（-1=随机，复现用）"},
                     "camera_fixed": {"type": "boolean"},
                     "service_tier": {"type": "string", "enum": ["default", "flex"]},
@@ -287,6 +418,46 @@ async def list_tools() -> list[types.Tool]:
             description="0 元 list 端点检测 API key 有效性（不扣费）。",
             inputSchema={"type": "object", "properties": {}},
         ),
+        types.Tool(
+            name="list_recent_tasks",
+            description=(
+                "查询本地缓存的历史任务（不调 API，0 元）。\n"
+                "⚠️ 已发任务 = 已扣费，绝不重提交。本工具用于查过往 task_id。\n\n"
+                "TTL 策略：本地缓存的视频 URL 保留期 **跟平台一致** —— "
+                "从 video_url 的 X-Tos-Expires 字段读取（当前 86400s = 24h），"
+                "如果未来平台改 1h，本工具自动同步。\n\n"
+                "返回字段：\n"
+                "  - task_id / status / cached_at\n"
+                "  - video_url / url_ttl_sec / url_expires_at / url_expired_by_local_clock\n"
+                "  - local_path（如果之前 wait_and_download 过）\n"
+                "  - duration / ratio / resolution / model"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "limit": {"type": "integer", "default": 20, "maximum": 100,
+                              "description": "返回最近 N 条"},
+                    "include_expired_urls": {"type": "boolean", "default": True,
+                                             "description": "是否包含 url_expired_by_local_clock=true 的记录"},
+                },
+            },
+        ),
+        types.Tool(
+            name="download_cached",
+            description=(
+                "用本地缓存的 video_url 下载（不调 list 端点）。\n"
+                "⚠️ URL 可能已过期——若已过期自动 fallback 到 check_task 重新拿新 URL。\n"
+                "推荐用法：先 list_recent_tasks → 拿 task_id → download_cached"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "task_id": {"type": "string", "description": "从 list_recent_tasks 拿到的 task_id"},
+                    "output_path": {"type": "string", "description": "本地保存路径（.mp4）"},
+                },
+                "required": ["task_id", "output_path"],
+            },
+        ),
     ]
 
 
@@ -299,6 +470,16 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
             task_id = result.get("id")
             if not task_id:
                 raise RuntimeError(f"no task_id in response: {result}")
+            # ⚠️ 写本地缓存（铁律 30 升级：已发任务 = 已扣费，本地必须有记录）
+            _cache_task(
+                task_id=task_id,
+                status=result.get("status", "queued"),
+                duration=body["duration"],
+                ratio=body["ratio"],
+                resolution=body.get("resolution"),
+                model=body["model"],
+                source="generate_video",
+            )
             return [types.TextContent(
                 type="text",
                 text=json.dumps({
@@ -322,11 +503,24 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
                 "updated_at": result.get("updated_at"),
             }
             content = result.get("content") or {}
-            if "video_url" in content:
-                out["video_url"] = content["video_url"]
-                out["_note"] = "video_url 24h 内有效，及时下载。"
+            video_url = content.get("video_url")
+            if video_url:
+                out["video_url"] = video_url
+                ttl = _parse_url_expires(video_url)
+                out["url_ttl_sec"] = ttl
+                out["url_expired_by_local_clock"] = _check_url_expired(video_url)
+                out["_note"] = f"video_url TTL={ttl}s（来自 X-Tos-Expires），及时下载。"
             if result.get("error"):
                 out["error"] = result["error"]
+            # ⚠️ 写本地缓存（铁律 30 升级：跨 session 可查）
+            _cache_task(
+                task_id=task_id,
+                status=result.get("status", "unknown"),
+                video_url=video_url,
+                duration=result.get("duration"),
+                ratio=result.get("ratio"),
+                resolution=result.get("resolution"),
+            )
             return [types.TextContent(type="text", text=json.dumps(out, ensure_ascii=False, indent=2))]
 
         elif name == "wait_and_download":
@@ -351,6 +545,18 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
                     out_p.parent.mkdir(parents=True, exist_ok=True)
                     with open(out_p, "wb") as f:
                         f.write(data)
+                    # ⚠️ 写本地缓存（铁律 30 升级）
+                    _cache_task(
+                        task_id=task_id,
+                        status="succeeded",
+                        video_url=video_url,
+                        duration=result.get("duration"),
+                        ratio=result.get("ratio"),
+                        resolution=result.get("resolution"),
+                        local_path=str(out_p),
+                        size_bytes=len(data),
+                        md5=hashlib.md5(data).hexdigest(),
+                    )
                     return [types.TextContent(
                         type="text",
                         text=json.dumps({
@@ -359,10 +565,13 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
                             "output_path": str(out_p),
                             "size_bytes": len(data),
                             "md5": hashlib.md5(data).hexdigest(),
+                            "url_ttl_sec": _parse_url_expires(video_url),
                         }, ensure_ascii=False, indent=2),
                     )]
                 elif status == "failed":
                     err = result.get("error", {})
+                    # 失败也写缓存（"已发任务 = 已扣费"，不要让 agent 误以为没跑过）
+                    _cache_task(task_id=task_id, status="failed", error=err)
                     raise RuntimeError(f"task failed: {err}")
                 time.sleep(poll)
             raise RuntimeError(f"timeout after {timeout}s")
@@ -381,6 +590,75 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
                     "valid": False,
                     "error": str(e),
                 }, ensure_ascii=False, indent=2))]
+
+        elif name == "list_recent_tasks":
+            limit = arguments.get("limit", 20)
+            include_expired = arguments.get("include_expired_urls", True)
+            records = _read_cache(limit=limit)
+            if not include_expired:
+                records = [r for r in records if not r.get("url_expired_by_local_clock", False)]
+            # 标准化 + 加过期标记
+            for r in records:
+                if r.get("video_url"):
+                    r["url_expired_by_local_clock"] = _check_url_expired(r["video_url"])
+            return [types.TextContent(
+                type="text",
+                text=json.dumps({
+                    "count": len(records),
+                    "cache_file": str(CACHE_FILE),
+                    "tasks": records,
+                }, ensure_ascii=False, indent=2),
+            )]
+
+        elif name == "download_cached":
+            task_id = arguments["task_id"]
+            output_path = arguments["output_path"]
+            # 从缓存拿 video_url
+            cache = {r["task_id"]: r for r in _read_cache(limit=200)}
+            rec = cache.get(task_id)
+            video_url = rec.get("video_url") if rec else None
+            url_expired = _check_url_expired(video_url) if video_url else True
+
+            # fallback：如果缓存没有 / URL 已过期 → 调 check_task 拿新 URL
+            if not video_url or url_expired:
+                result = _ark_request("GET", f"{ARK_BASE_URL}/{task_id}", timeout=30)
+                video_url = result.get("content", {}).get("video_url")
+                if not video_url:
+                    raise RuntimeError(f"task {task_id} 无 video_url（可能仍 running/failed: {result.get('status')}）")
+                # 更新缓存
+                _cache_task(
+                    task_id=task_id,
+                    status=result.get("status", "unknown"),
+                    video_url=video_url,
+                    duration=result.get("duration"),
+                    ratio=result.get("ratio"),
+                    resolution=result.get("resolution"),
+                )
+                fallback_used = True
+            else:
+                fallback_used = False
+
+            # 下载
+            req = urllib.request.Request(video_url, headers={"User-Agent": UA})
+            with urllib.request.urlopen(req, timeout=120, context=ssl.create_default_context()) as r:
+                data = r.read()
+            out_p = Path(output_path)
+            out_p.parent.mkdir(parents=True, exist_ok=True)
+            with open(out_p, "wb") as f:
+                f.write(data)
+            return [types.TextContent(
+                type="text",
+                text=json.dumps({
+                    "task_id": task_id,
+                    "output_path": str(out_p),
+                    "size_bytes": len(data),
+                    "md5": hashlib.md5(data).hexdigest(),
+                    "url_ttl_sec": _parse_url_expires(video_url),
+                    "url_was_expired_before_download": url_expired,
+                    "api_fallback_used": fallback_used,
+                    "_note": "url 过期时已自动 fallback 到 check_task 拿新 URL。",
+                }, ensure_ascii=False, indent=2),
+            )]
 
         else:
             raise ValueError(f"unknown tool: {name}")
