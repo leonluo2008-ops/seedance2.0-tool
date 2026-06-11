@@ -104,8 +104,56 @@ metadata:
 - ✅ 用场景名："用绘本领读型跑 clip3" / "用知识科普型写 prompt"
 
 ### 6. **本地路径不直接喂**
-| ❌ 传 `"ref_images": ["${LOCAL_REF_IMAGE_PATH}"]`（seedance API 不接本地路径）|
+- ❌ 传 `"ref_images": ["${LOCAL_REF_IMAGE_PATH}"]`（seedance API 不接本地路径）
 - ✅ MCP 工具**自动**通过 uguu（${FILE_HOST}）上传转公网 URL——**不**手动上传
+
+### 7. **参数透传铁律**（2026-06-11 用户红线 · 重要）
+
+**MCP 工具绝不强制覆盖 agent 传过来的参数**。逻辑：
+
+- **agent 传了值** → **严格用 agent 的值**（即使违反默认推荐）
+  - 例：绘本有声绘本场景，agent 主动 `generate_audio=True` → 工具**必须**用 True（带 BGM/音效）
+  - 例：用户要水印，agent 主动 `watermark="seedance_ai"` → 工具**必须**用 seedance_ai
+- **agent 没传** → 走 inputSchema 的 default
+  - `generate_audio` 默认 `false`（绘本无 BGM）
+  - `watermark` 默认 `"none"`（绘本无水印）
+  - `ratio` 默认 `"16:9"`
+  - `resolution` 默认 `"720p"`
+  - `model` 默认 `doubao-seedance-2-0-fast-260128`
+
+**实现细节**（seedance_uploads.py:build_body）：
+
+```python
+# ✅ 正确：区分"没传"和"传了 None"
+if "generate_audio" in args:
+    body["generate_audio"] = args["generate_audio"]
+else:
+    body["generate_audio"] = False  # inputSchema default
+
+# ❌ 错误：会把"传了 None"吞成 False
+generate_audio = args.get("generate_audio", False)
+```
+
+**判断方法**用 `if X in args`，**不**用 `args.get(X, default)`——后者会隐式吞 None。
+
+**目的**：绘本有声绘本 / 社媒视频 / 用户临时改需求 → agent 都能精准控制。**禁止** MCP 工具"自作主张"覆盖 agent 的明确意图。
+
+**反例**（绘本错误改 prompt 路径）：
+- ❌ 工具看到 `generate_audio=True` → "绘本不该有 BGM" → 自动改 False
+- ❌ 工具看到 `watermark="seedance_ai"` → "绘本不该有水印" → 自动改 None
+- ✅ 工具**不**判断场景，**只**判断"传了没传"
+
+**全 6 字段行为矩阵**：
+
+| 字段 | agent 传 X | agent 传 None | agent 不传 |
+|------|----------|--------------|----------|
+| `generate_audio` | ✅ body = X | ✅ body = None | body = False（绘本默认）|
+| `watermark` | ✅ 按字符串枚举映射 | ✅ 按字符串枚举映射 | body = False（绘本默认）|
+| `duration` | ✅ body = X | ❌ KeyError（必传）| ❌ KeyError（必传）|
+| `ratio` | ✅ body = X | ✅ body = None | body = "16:9" |
+| `resolution` | ✅ body = X | ❌ 不写入 body（None falsy）| ❌ 不写入 body |
+| `model` | ✅ body = X | ✅ body = None | body = DEFAULT_MODEL |
+| `seed` / `camera_fixed` / `service_tier` | ✅ body = X | ❌ 不写入 body（None falsy）| ❌ 不写入 body |
 
 ---
 
