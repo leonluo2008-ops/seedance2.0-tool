@@ -1,212 +1,196 @@
 #!/usr/bin/env python3
 """
-Seedance 2.0 Tool - 纯视频生成工具（唯一图床：Chevereto）
+Seedance 2.0 Tool - 视频生成工具 CLI（统一图床：uguu.se）
 
-调用 Volcengine Seedance 2.0 API，仅支持 Chevereto 图床上传。
+调用 Volcengine Seedance 2.0 API，**唯一图床 = uguu.se**（不再用 chevereto）。
+
+**单真源原则**：本文件只保留 CLI 入口；上传 / Ark API / 任务缓存 / body 构造
+全部抽到 seedance_uploads.py。改上传/缓存逻辑请改 seedance_uploads.py。
 
 用法：
-    python3 seedance.py create --ref-images ./character.png --video-refs ./motion.mp4 \
-        --prompt "使用图片1的角色，替换视频1中的角色，纯白色背景" \
-        --duration 5 --ratio 1:1 --wait --download ./output
+    python3 seedance.py create --ref-images ./character.png \
+        --prompt "使用图片1的角色..." --duration 5 --ratio 1:1 --wait --download ./output
 
 环境变量：
     ARK_API_KEY         : Volcengine Ark API Key（必填）
-    CHEVERETO_API_KEY   : Chevereto 图床 API Key（必填）
-"""
+    SEEDANCE_CACHE_DIR  : 本地任务缓存目录（可选，默认 ~/.cache/seedance-mcp）
 
+变更记录：
+- 2026-06-11 v1.0 迁移到 uguu.se + httpx async + 任务缓存
+  - 删 5 个 chevereto 函数（upload_to_chevereto / upload_image / upload_video / resolve_image_url / resolve_video_url）
+  - 删 .env 必填 CHEVERETO_API_KEY
+  - 底层调 seedance_uploads.py（业务函数库）
+  - watermark 默认改 None（绘本场景专精）
+  - generate_audio 默认 False（绘本无 BGM）
+  - seed/camera_fixed/draft/return_last_frame/service_tier 全部顶层（**不**嵌套 parameters）
+"""
 import argparse
 import json
 import os
-import subprocess
 import sys
 import time
-import urllib.error
-import urllib.request
 from pathlib import Path
-from dotenv import load_dotenv
+
+# 共享业务函数库（单真源）
+import seedance_uploads as U
+
+# 老 seedance.py 兼容别名
+DEFAULT_MODEL = U.DEFAULT_MODEL
+BASE_URL = U.ARK_BASE_URL
+parse_bool = lambda v: (v.lower() in ("true", "1", "yes")) if isinstance(v, str) else bool(v)
 
 
-def parse_bool(v):
-    """Parse boolean CLI argument (true/false/1/0)."""
-    if isinstance(v, bool):
-        return v
-    if v.lower() in ("true", "1", "yes"):
-        return True
-    if v.lower() in ("false", "0", "no"):
-        return False
-    raise argparse.ArgumentTypeError(f"Boolean expected, got '{v}'")
+# ============ CLI 命令 ============
 
-# ============ 配置 ============
+def cmd_create(args):
+    """创建视频生成任务（保留 CLI 入口行为，老用户兼容）。"""
+    # 用 seedance_uploads.build_body 构造请求体（共享逻辑，单真源）
+    body_args = {
+        "prompt": args.prompt,
+        "ref_images": args.ref_images or [],
+        "image": getattr(args, "image", None),
+        "last_frame": getattr(args, "last_frame", None),
+        "video_refs": args.video_refs or [],
+        "audio_refs": args.audio or [],
+        "draft_task_id": getattr(args, "draft_task_id", None),
+        "duration": args.duration,
+        "ratio": args.ratio,
+        "watermark": getattr(args, "watermark", None),  # 字符串 'none'/'platform'/'seedance_ai'，build_body 内部映射
+        "generate_audio": getattr(args, "generate_audio", None),
+        "resolution": args.resolution,
+        "model": args.model,
+        "seed": getattr(args, "seed", None),
+        "camera_fixed": getattr(args, "camera_fixed", None),
+        "draft": getattr(args, "draft", None),
+        "return_last_frame": getattr(args, "return_last_frame", None),
+        "service_tier": getattr(args, "service_tier", None),
+    }
 
-DEFAULT_MODEL = "doubao-seedance-2-0-fast-260128"
-BASE_URL = os.environ.get("ARK_BASE_URL", "https://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks")
-CHEVERETO_API_URL = "https://chevereto.aistar.work/api/1/upload"
-
-
-def get_api_key() -> str:
-    key = os.environ.get("ARK_API_KEY")
-    if not key:
-        print("Error: ARK_API_KEY environment variable is not set.", file=sys.stderr)
-        print("Set it with: export ARK_API_KEY='your-ark-api-key'", file=sys.stderr)
-        sys.exit(1)
-    return key
-
-
-def get_chevereto_key() -> str:
-    key = os.environ.get("CHEVERETO_API_KEY")
-    if not key:
-        print("Error: CHEVERETO_API_KEY environment variable is not set.", file=sys.stderr)
-        print("Set it with: export CHEVERETO_API_KEY='your-chevereto-api-key'", file=sys.stderr)
-        sys.exit(1)
-    return key
-
-
-# ============ Chevereto 图床上传（curl 绕过 Cloudflare）============
-
-def upload_to_chevereto(local_path: str, mime_type: str) -> str:
-    """
-    上传本地文件到 Chevereto 图床，返回公开 URL（HTTP）。
-    mime_type 示例：'video/mp4', 'image/png', 'image/jpeg'
-    使用 curl 绕过 Cloudflare 对 urllib/requests 的拦截。
-    """
-    p = Path(local_path)
-    if not p.exists():
-        print(f"Error: File not found: {local_path}", file=sys.stderr)
-        sys.exit(1)
-
-    file_size = p.stat().st_size
-    max_size = 50 * 1024 * 1024 if mime_type.startswith("video") else 30 * 1024 * 1024
-    if file_size > max_size:
-        print(f"Error: File too large ({file_size / 1024 / 1024:.1f} MB). Max {max_size // 1024 // 1024} MB.", file=sys.stderr)
-        sys.exit(1)
-
-    api_key = get_chevereto_key()
-    print(f"  Uploading to Chevereto ({p.name}, {file_size / 1024 / 1024:.1f} MB)...", end=" ", flush=True)
-
+    # 同步上传所有本地文件 → resolved_urls（保留老 CLI 同步语义）
     try:
-        result = subprocess.run(
-            [
-                "curl", "-s", "-X", "POST",
-                CHEVERETO_API_URL,
-                "-F", f"source=@{p};type={mime_type}",
-                "-F", f"key={api_key}",
-            ],
-            capture_output=True, text=True, timeout=60
-        )
-        if result.returncode != 0:
-            print(f"\nError: curl failed: {result.stderr}", file=sys.stderr)
-            sys.exit(1)
-
-        response = json.loads(result.stdout)
-        if response.get("status_code") != 200:
-            print(f"\nError: Chevereto API error: {response.get('status_txt')} (code {response.get('status_code')})", file=sys.stderr)
-            sys.exit(1)
-
-        url = response.get("image", {}).get("url", "")
-        if not url:
-            print(f"\nError: Chevereto response missing URL: {response}", file=sys.stderr)
-            sys.exit(1)
-
-        print("✓")
-        # 修复：chevereto 在 Seedance 内部网络下 http 可能不可达，强制 https
-        # 原因：chevereto.aistar.work 部署在本机可访问（内网 IP），但 Seedance API 走火山引擎内网时
-        #       http://chevereto.aistar.work 可能解析到不同 IP 段（外网不可达）→ 导致 Seedance 报 InvalidParameter
-        #       改为 https:// 走 Cloudflare → Seedance 内网可访问
-        if url.startswith("http://chevereto."):
-            url = url.replace("http://", "https://", 1)
-        return url
-
-    except subprocess.TimeoutExpired:
-        print("Error: Upload timed out after 60s", file=sys.stderr)
-        sys.exit(1)
-
-
-def upload_image(file_path: str) -> str:
-    """上传图片到 Chevereto，返回公网 URL"""
-    suffix = Path(file_path).suffix.lower()
-    mime_type = "image/png" if suffix == ".png" else "image/jpeg"
-    return upload_to_chevereto(file_path, mime_type)
-
-
-def upload_video(file_path: str) -> str:
-    """上传视频到 Chevereto，返回公网 URL。视频必须显式指定 type=video/mp4。"""
-    return upload_to_chevereto(file_path, "video/mp4")
-
-
-def resolve_image_url(image_input: str) -> str:
-    """解析图片输入：URL 直接返回，本地文件上传 Chevereto"""
-    if image_input.startswith(("http://", "https://", "data:")):
-        return image_input
-    return upload_image(image_input)
-
-
-def resolve_video_url(video_input: str) -> str:
-    """解析视频输入：URL 直接返回，本地文件上传 Chevereto"""
-    if video_input.startswith(("http://", "https://")):
-        return video_input
-    return upload_video(video_input)
-
-
-def resolve_audio_url(audio_input: str) -> str:
-    """解析音频输入：URL 直接返回，本地文件上传 Chevereto。"""
-    if audio_input.startswith(("http://", "https://", "data:")):
-        return audio_input
-    suffix = Path(audio_input).suffix.lower()
-    mime_type = {
-        ".mp3": "audio/mpeg",
-        ".wav": "audio/wav",
-        ".aac": "audio/aac",
-        ".m4a": "audio/mp4",
-    }.get(suffix, "application/octet-stream")
-    return upload_to_chevereto(audio_input, mime_type)
-
-
-# ============ 工具函数 ============
-
-def verify_url_accessible(url: str, timeout: int = 10) -> bool:
-    """验证 URL 是否可访问（HEAD 请求）"""
-    try:
-        req = urllib.request.Request(url, method="HEAD")
-        req.add_header("User-Agent", "Mozilla/5.0")
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return resp.status == 200
-    except Exception:
-        return False
-
-
-def api_request(method: str, url: str, data: dict = None, timeout: int = 120) -> dict:
-    """Make an API request and return parsed JSON response."""
-    api_key = get_api_key()
-
-    req = urllib.request.Request(url, method=method)
-    req.add_header("Authorization", f"Bearer {api_key}")
-    req.add_header("Content-Type", "application/json")
-    req.add_header("User-Agent", "SeedanceTool/1.0")
-
-    if data:
-        req.data = json.dumps(data).encode("utf-8")
-
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError as e:
-        error_body = e.read().decode("utf-8", errors="replace")
-        try:
-            error_json = json.loads(error_body)
-            print(f"API Error (HTTP {e.code}): {error_json.get('error', {}).get('message', error_body[:500])}", file=sys.stderr)
-        except Exception:
-            print(f"API Error (HTTP {e.code}): {error_body[:500]}", file=sys.stderr)
-        sys.exit(1)
+        resolved_urls = {}
+        for kind, key in [("image", "ref_images"), ("image", "image"), ("image", "last_frame"),
+                          ("video", "video_refs"), ("audio", "audio_refs")]:
+            v = body_args.get(key)
+            if not v:
+                continue
+            items = v if isinstance(v, list) else [v]
+            for item in items:
+                if item in resolved_urls:
+                    continue
+                resolved_urls[item] = U.resolve_url(item, kind)
     except Exception as e:
-        print(f"API Error: {e}", file=sys.stderr)
+        print(f"Error: file resolution failed: {e}", file=sys.stderr)
         sys.exit(1)
+
+    # watermark 字符串兼容：老 seedance.py 接受 true/false，mcp 接受 'none'/'platform'/'seedance_ai'
+    # 这里加映射：true → 'seedance_ai'（保持老行为），false → 'none'（绘本正确）
+    if isinstance(body_args["watermark"], bool):
+        body_args["watermark"] = "seedance_ai" if body_args["watermark"] else "none"
+
+    try:
+        body = U.build_body(body_args, resolved_urls=resolved_urls)
+    except Exception as e:
+        print(f"Error: build body failed: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"Creating task with model {args.model}...")
+    print("BODY:", json.dumps(body, ensure_ascii=False)[:2000])
+
+    try:
+        result = U.ark_request("POST", BASE_URL, body)
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    task_id = result.get("id")
+    if not task_id:
+        print(f"Error: No task ID in response: {result}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"Task ID: {task_id}")
+
+    # 写本地缓存（spike 002 升级：跨 session 可查）
+    U.cache_task(
+        task_id=task_id, status=result.get("status", "queued"),
+        duration=body["duration"], ratio=body["ratio"], resolution=body.get("resolution"),
+        model=body["model"], source="seedance_cli",
+    )
+
+    if args.wait:
+        print("Waiting for completion...")
+        result = wait_for_completion(task_id)
+
+        if args.download:
+            video_url = result.get("content", {}).get("video_url")
+            if video_url:
+                if U.download_video(video_url, args.download):
+                    print(f"  Downloaded: {args.download}")
+                else:
+                    print(f"Warning: download failed", file=sys.stderr)
+            else:
+                print("Warning: No video_url in result", file=sys.stderr)
+                print(json.dumps(result, indent=2, ensure_ascii=False))
+
+        # 成功后更新缓存（含 video_url + TTL）
+        video_url = result.get("content", {}).get("video_url")
+        U.cache_task(
+            task_id=task_id, status=result.get("status", "succeeded"),
+            video_url=video_url,
+            duration=result.get("duration"), ratio=result.get("ratio"),
+            resolution=result.get("resolution"),
+            local_path=args.download if args.download else None,
+        )
+
+        print(f"\n✅ Task completed: {task_id}")
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+    else:
+        print(f"\n✅ Task created: {task_id}")
+        print("Use 'seedance.py status <task_id>' to check progress.")
+
+
+def cmd_status(args):
+    """查询任务状态"""
+    try:
+        result = U.ark_request("GET", f"{BASE_URL}/{args.task_id}")
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+    print(json.dumps(result, indent=2, ensure_ascii=False))
+    # 写缓存
+    U.cache_task(
+        task_id=args.task_id, status=result.get("status", "unknown"),
+        video_url=result.get("content", {}).get("video_url"),
+        duration=result.get("duration"), ratio=result.get("ratio"),
+        resolution=result.get("resolution"),
+    )
+
+
+def cmd_wait(args):
+    """等待任务完成并下载"""
+    print(f"Waiting for task {args.task_id}...")
+    result = wait_for_completion(args.task_id)
+
+    if args.download:
+        video_url = result.get("content", {}).get("video_url")
+        if video_url:
+            if U.download_video(video_url, args.download):
+                print(f"  Downloaded: {args.download}")
+            else:
+                print(f"Warning: download failed", file=sys.stderr)
+
+    print(json.dumps(result, indent=2, ensure_ascii=False))
 
 
 def wait_for_completion(task_id: str, poll_interval: int = 15, timeout: int = 600) -> dict:
-    """轮询等待任务完成"""
+    """轮询等待任务完成（同步版，给老 CLI 用）。"""
     start = time.time()
     while time.time() - start < timeout:
-        result = api_request("GET", f"{BASE_URL}/{task_id}")
+        try:
+            result = U.ark_request("GET", f"{BASE_URL}/{task_id}")
+        except Exception as e:
+            print(f"Error: {e}", file=sys.stderr)
+            sys.exit(1)
         status = result.get("status", "")
 
         if status == "succeeded":
@@ -225,166 +209,11 @@ def wait_for_completion(task_id: str, poll_interval: int = 15, timeout: int = 60
     sys.exit(1)
 
 
-def download_video(url: str, output_path: str) -> bool:
-    """下载视频文件"""
-    try:
-        req = urllib.request.Request(url)
-        req.add_header("User-Agent", "SeedanceTool/1.0")
-        with urllib.request.urlopen(req, timeout=60) as resp:
-            content_type = resp.headers.get("Content-Type", "")
-            ext = ".mp4"
-            if "video/mp4" in content_type:
-                ext = ".mp4"
-            elif "video/webm" in content_type:
-                ext = ".webm"
-
-            if Path(output_path).suffix not in (".mp4", ".webm", ".mov"):
-                output_path = str(Path(output_path).with_suffix(ext))
-
-            with open(output_path, "wb") as f:
-                while True:
-                    chunk = resp.read(8192)
-                    if not chunk:
-                        break
-                    f.write(chunk)
-
-            print(f"  Downloaded: {output_path}")
-            return True
-    except Exception as e:
-        print(f"  Download failed: {e}", file=sys.stderr)
-        return False
-
-
-# ============ CLI 命令 ============
-
-def cmd_create(args):
-    """创建视频生成任务"""
-    content = []
-
-    # 草稿模式：直接用 draft_task_id 生成正式视频
-    if getattr(args, "draft_task_id", None):
-        content.append({"type": "draft_task", "draft_task": {"id": args.draft_task_id}})
-    else:
-        if getattr(args, "prompt", None):
-            content.append({"type": "text", "text": args.prompt})
-
-        # 参考图片（角色参考）
-        ref_images = getattr(args, "ref_images", None) or []
-        for img in ref_images:
-            content.append({
-                "type": "image_url",
-                "image_url": {"url": resolve_image_url(img)},
-                "role": "reference_image"
-            })
-
-        # 首帧/尾帧图片（与参考图片二选一）
-        if getattr(args, "image", None):
-            img_url = resolve_image_url(args.image)
-            content.append({"type": "image_url", "image_url": {"url": img_url}, "role": "first_frame"})
-            if getattr(args, "last_frame", None):
-                content.append({"type": "image_url", "image_url": {"url": resolve_image_url(args.last_frame)}, "role": "last_frame"})
-
-        # 参考视频
-        video_refs = getattr(args, "video_refs", None) or []
-        for vid in video_refs:
-            content.append({
-                "type": "video_url",
-                "video_url": {"url": resolve_video_url(vid)},
-                "role": "reference_video"
-            })
-
-        # 参考音频
-        audio_refs = getattr(args, "audio", None) or []
-        for audio in audio_refs:
-            content.append({"type": "audio_url", "audio_url": {"url": resolve_audio_url(audio)}, "role": "reference_audio"})
-
-    if not content:
-        print("Error: Must provide --prompt, --image, --ref-images, --video-refs, --audio, or --draft-task-id.", file=sys.stderr)
-        sys.exit(1)
-
-    # 构建请求体
-    # 注意：官方 API 规范中 duration/ratio/watermark/gener_audio 为顶层参数
-    # 只有 seed/camera_fixed/draft/return_last_frame/service_tier 放在 parameters 对象中
-    body = {
-        "model": args.model,
-        "content": content,
-        "duration": args.duration,
-        "ratio": args.ratio,
-    }
-
-    # 可选参数：顶层
-    if getattr(args, "watermark", None) is not None:
-        body["watermark"] = args.watermark
-    if getattr(args, "generate_audio", None) is not None:
-        body["generate_audio"] = args.generate_audio
-
-    # 可选参数：嵌套在 parameters 对象中
-    extra_params = {}
-    if getattr(args, "seed", None) is not None:
-        extra_params["seed"] = args.seed
-    if getattr(args, "camera_fixed", None) is not None:
-        extra_params["camera_fixed"] = args.camera_fixed
-    if getattr(args, "draft", None) is not None:
-        extra_params["draft"] = args.draft
-    if getattr(args, "return_last_frame", None) is not None:
-        extra_params["return_last_frame"] = args.return_last_frame
-    if getattr(args, "service_tier", None):
-        extra_params["service_tier"] = args.service_tier
-    if extra_params:
-        body["parameters"] = extra_params
-
-    print(f"Creating task with model {args.model}..."); import json as _json; print("BODY:", _json.dumps(body, ensure_ascii=False)[:2000])
-    result = api_request("POST", f"{BASE_URL}", body)
-
-    task_id = result.get("id")
-    if not task_id:
-        print(f"Error: No task ID in response: {result}", file=sys.stderr)
-        sys.exit(1)
-
-    print(f"Task ID: {task_id}")
-
-    if args.wait:
-        print("Waiting for completion...")
-        result = wait_for_completion(task_id)
-
-        if args.download:
-            video_url = result.get("content", {}).get("video_url")
-            if video_url:
-                download_video(video_url, args.download)
-            else:
-                print("Warning: No video_url in result", file=sys.stderr)
-                print(json.dumps(result, indent=2, ensure_ascii=False))
-
-        print(f"\n✅ Task completed: {task_id}")
-        print(json.dumps(result, indent=2, ensure_ascii=False))
-    else:
-        print(f"\n✅ Task created: {task_id}")
-        print("Use 'seedance.py status <task_id>' to check progress.")
-
-
-def cmd_status(args):
-    """查询任务状态"""
-    result = api_request("GET", f"{BASE_URL}/{args.task_id}")
-    print(json.dumps(result, indent=2, ensure_ascii=False))
-
-
-def cmd_wait(args):
-    """等待任务完成并下载"""
-    print(f"Waiting for task {args.task_id}...")
-    result = wait_for_completion(args.task_id)
-
-    if args.download:
-        video_url = result.get("content", {}).get("video_url")
-        if video_url:
-            download_video(video_url, args.download)
-
-    print(json.dumps(result, indent=2, ensure_ascii=False))
-
-
 # ============ 主入口 ============
 
 def main():
-    # 自动加载 .env 文件（从脚本所在目录向上查找）
+    # 自动加载 .env 文件
+    from dotenv import load_dotenv
     script_dir = Path(__file__).resolve().parent
     for candidate in [script_dir, script_dir.parent, Path.cwd()]:
         env_path = candidate / ".env"
@@ -392,20 +221,23 @@ def main():
             load_dotenv(env_path)
             break
 
+    # 必填环境变量校验
+    if not os.environ.get("ARK_API_KEY"):
+        print("Error: ARK_API_KEY environment variable is not set.", file=sys.stderr)
+        print("Set it with: export ARK_API_KEY='your-ark-api-key'", file=sys.stderr)
+        sys.exit(1)
+
     parser = argparse.ArgumentParser(
-        description="Seedance 2.0 Tool - 视频生成工具（唯一图床：Chevereto）",
+        description="Seedance 2.0 Tool - 视频生成工具（统一图床：uguu.se）",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python3 seedance.py create --ref-images char.png --video-refs motion.mp4 \
-      --prompt "使用图片1的角色，替换视频1中的角色，纯白色背景" \
-      --duration 5 --ratio 1:1 --wait --download ./output
+  python3 seedance.py create --ref-images char.png --prompt "使用图片1的角色..." --duration 5 --ratio 1:1 --wait --download ./output
 
 Environment variables:
-  ARK_API_KEY        : Volcengine Ark API Key（必填）
-  CHEVERETO_API_KEY  : Chevereto 图床 API Key（必填）
-"""
-    )
+  ARK_API_KEY         : Volcengine Ark API Key（必填）
+  SEEDANCE_CACHE_DIR  : 本地任务缓存目录（可选，默认 ~/.cache/seedance-mcp）
+""")
 
     subparsers = parser.add_subparsers(dest="command", help="Commands")
 
@@ -423,7 +255,9 @@ Environment variables:
     create_parser.add_argument("--resolution", default="720p", help="分辨率（480p/720p/1080p）")
     create_parser.add_argument("--seed", type=int, help="随机种子（-1=随机，用于复现）")
     create_parser.add_argument("--camera-fixed", type=parse_bool, help="固定镜头位置（true/false）")
-    create_parser.add_argument("--watermark", type=parse_bool, default=True, help="添加水印（true/false，默认true）")
+    # watermark 老 CLI 兼容：true/false → 内部映射 'none'/'seedance_ai'/'platform'
+    create_parser.add_argument("--watermark", type=parse_bool, default=False,
+                               help="是否带 AI 水印（true/false，**默认 false**）—— 绘本场景必传 false")
     create_parser.add_argument("--generate-audio", type=parse_bool, help="生成音频（true/false）")
     create_parser.add_argument("--draft", type=parse_bool, help="草稿/预览模式（true/false）")
     create_parser.add_argument("--return-last-frame", type=parse_bool, help="返回尾帧图片URL（true/false）")

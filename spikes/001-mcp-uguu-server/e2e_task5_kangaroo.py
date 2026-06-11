@@ -16,9 +16,10 @@ import sys
 import time
 from pathlib import Path
 
-# 让 import 找到 mcp_server
+# 让 import 找到 mcp_server + seedance_uploads
 HERE = Path(__file__).parent
-sys.path.insert(0, str(HERE))
+sys.path.insert(0, str(HERE))           # mcp_server
+sys.path.insert(0, str(HERE.parent))   # seedance_uploads（仓库根）
 
 # .env 加载（必须在 import mcp_server 之前，_get_ark_key 读 env var）
 from dotenv import load_dotenv
