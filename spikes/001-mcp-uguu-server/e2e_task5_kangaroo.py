@@ -102,12 +102,7 @@ async def run_e2e():
         result = await M._ark_request_async("POST", M.ARK_BASE_URL, body, timeout=60)
         elapsed = time.time() - t0
         task_id = result["id"]
-        # 4. 写本地缓存
-        M._cache_task(
-            task_id=task_id, status=result.get("status", "queued"),
-            duration=body["duration"], ratio=body["ratio"], resolution=body.get("resolution"),
-            model=body["model"], source="e2e_task5",
-        )
+        # ⚠️ 2026-06-13 移除 _cache_task 调用：本地 cache 已删
         return clip["name"], task_id, elapsed, body["model"]
 
     t0 = time.time()
@@ -138,16 +133,10 @@ async def run_e2e():
                 Path(output_path).parent.mkdir(parents=True, exist_ok=True)
                 with open(output_path, "wb") as f:
                     f.write(data)
-                M._cache_task(
-                    task_id=tid, status="succeeded", video_url=video_url,
-                    duration=r.get("duration"), ratio=r.get("ratio"),
-                    resolution=r.get("resolution"),
-                    local_path=str(output_path), size_bytes=len(data),
-                    md5=__import__("hashlib").md5(data).hexdigest(),
-                )
+                # ⚠️ 2026-06-13 移除 _cache_task 调用
                 return name, tid, str(output_path), len(data)
             elif status == "failed":
-                M._cache_task(task_id=tid, status="failed", error=r.get("error"))
+                # ⚠️ 2026-06-13 移除 _cache_task 调用
                 raise RuntimeError(f"{name} failed: {r.get('error')}")
             await asyncio.sleep(15)
         raise RuntimeError(f"{name} timeout 5min")
@@ -159,15 +148,17 @@ async def run_e2e():
     for name, tid, path, size in downloads:
         print(f"    {name}: {tid} → {path} ({size/1024:.1f}KB)")
 
-    # ========== 4. list_recent_tasks（验证缓存写入）==========
-    print("\n[4] list_recent_tasks (本地缓存验证)")
-    cache = M._read_cache(limit=10)
+    # ========== 4. 官方 list 端点（验证真实任务状态）==========
+    # 2026-06-13 替代 list_recent_tasks（已删）：走官方 ark list 端点拿真实状态
+    print("\n[4] 官方 list 端点 (验证真实任务状态)")
+    result = await M._ark_request_async("GET", f"{M.ARK_BASE_URL}?page_size=10", timeout=30)
+    items = result.get("items") or []
     new_ids = {tid for _, tid, _, _ in submissions}
-    cached_new = [r for r in cache if r["task_id"] in new_ids]
-    print(f"  缓存总数: {len(cache)} · 新提交 3 个都在缓存: {len(cached_new)}/3")
-    for r in cached_new:
-        print(f"    {r['task_id']} · status={r.get('status')} · has_url={bool(r.get('video_url'))} · ttl={r.get('url_ttl_sec')}s")
-    assert len(cached_new) == 3, "缓存里没找到 3 个新任务！"
+    listed_new = [r for r in items if r.get("id") in new_ids]
+    print(f"  list 返回总数: {result.get('total', len(items))} · 本次 3 个都在: {len(listed_new)}/3")
+    for r in listed_new:
+        print(f"    {r.get('id')} · status={r.get('status')} · has_url={bool(r.get('content', {}).get('video_url'))}")
+    assert len(listed_new) == 3, f"list 端点没找到 3 个新任务！found={len(listed_new)}"
 
     # ========== 5. ffprobe 校验 ==========
     print("\n[5] ffprobe 校验 3 个视频")
@@ -183,22 +174,22 @@ async def run_e2e():
         print(f"    {name}: {info['width']}x{info['height']} {info['codec_name']} dur={info.get('duration')}s")
         assert int(info["width"]) > 0, f"{name} invalid width"
 
-    # ========== 6. download_cached 二次下载（不调 API）==========
-    print("\n[6] download_cached 二次下载 (验证缓存 + URL 重用)")
+    # ========== 6. check_task 二次拉新 URL（替代 download_cached 缓存命中）==========
+    # 2026-06-13 替代 download_cached：直接调 check_task 拿新 video_url 下载
+    print("\n[6] check_task 二次验证 + 重下（替代缓存命中）")
     for name, tid, path, size in downloads:
-        # 找缓存里这条
-        rec = next(r for r in cache if r["task_id"] == tid)
-        cached_url = rec.get("video_url")
-        assert cached_url, f"{name} 缓存里没 video_url"
-        # 用同一个 URL 再下 1 次
+        # 调 check_task 拿最新 video_url（官方 API 直连，不依赖本地 cache）
+        result = await M._ark_request_async("GET", f"{M.ARK_BASE_URL}/{tid}", timeout=30)
+        vurl = result.get("content", {}).get("video_url")
+        assert vurl, f"{name} check_task 没拿到 video_url"
         client = await M._get_http_client()
-        dl = await client.get(cached_url, timeout=60)
+        dl = await client.get(vurl, timeout=60)
         dl.raise_for_status()
         size2 = len(dl.content)
         print(f"    {name}: 重下 {size2/1024:.1f}KB (跟首次 {size/1024:.1f}KB 对比)")
 
     print("\n" + "=" * 70)
-    print("✅ TASK 5 通过 · 6 工具端到端全跑通")
+    print("✅ TASK 5 通过 · 5 工具端到端全跑通（list_recent_tasks + download_cached 已删，4 工具）")
     print("=" * 70)
     for name, tid, path, size in downloads:
         print(f"  {name}: {path}")

@@ -8,8 +8,9 @@ description: |
     · check_task           查状态
     · wait_and_download    同步等待+下载
     · verify_api_key       0 元连通性
-    · list_recent_tasks    本地缓存查询（可选）
-    · download_cached      缓存复用下载（可选）
+
+  > ⚠️ 2026-06-13 起 `list_recent_tasks` / `download_cached` 工具已删（基于本地 cache），
+  > 历史任务查询改用 `check_task` + 官方 ark list 端点（`seedance.py list`）
   
   工具数量 / 名称以 mcp server 实际暴露为准。本 skill 不写死工具名细节，
   只覆盖"该不该调 / 怎么调 / 怎么不翻车"的方法论。
@@ -62,15 +63,14 @@ metadata:
 | **提交任务** | `generate_video` | 提交、生成、跑、起一个 | 单个 4-15s 视频，文/图参考 |
 | **查状态** | `check_task` | 查、状态、轮询、succeeded? | 已知 task_id，看是否跑完 |
 | **同步等待+下载** | `wait_and_download` | 等待、下载、保存 | task_id 已知，要拿到 mp4 |
-| **历史任务** | `list_recent_tasks` | 列出、缓存、最近 | 24h 内复用 task，不重新提交 |
-| **缓存下载** | `download_cached` | 缓存、重下、复用 | task 已在缓存，不调 API 重下 |
+| **历史任务** | （无 MCP 工具，调官方 list 端点） | 列出、最近 | `seedance.py list --page-size N` |
 
 **核心铁律**：
 
 - **`verify_api_key` 永远 0 元**——动手前必跑（30s 验证，**不**调 create 扣费）
 - **`generate_video` 是唯一扣费点**——调之前**必问用户拍板**
 - **`wait_and_download` = `check_task` 循环 + 下载**——单段场景优先这个，别自己写轮询
-- **缓存命中比调 API 便宜**——同 task_id 不重复扣费
+- **同 task_id 不重复扣费**——`check_task` 直接查官方 API（2026-06-13 起 cache 已删）
 
 ---
 
@@ -177,7 +177,7 @@ generate_audio = args.get("generate_audio", False)
    - resolution（默认 480p，720p 高清）
    - model（Fast/Pro，绘本 Fast 够用）
 3. generate_video → 立刻拿到 task_id
-4. 缓存：检查 `list_recent_tasks` 是否已有同 prompt 任务（24h 内复用）
+4. **已删**：原 `list_recent_tasks` 检查缓存复用段（2026-06-13 cache 已删）
 5. wait_and_download → 5-15 分钟 → mp4 落盘
 6. **vision 4 帧抽帧自检**（必跑，详 §自检规则）
 7. 自检失败 → 改 prompt 重新 generate_video（**不**调 API 多次重试）
@@ -317,9 +317,10 @@ ffmpeg -y -sseof -0.1 -i input.mp4 -vframes 1 frame_end.jpg
 |------|------|--------|
 | `${ENV:ARK_API_KEY}` | provider 鉴权 | `***`（填真值，**不**进 git / 文档）|
 | `${ENV:SEEDANCE_BASE_URL}` | API endpoint | `https://ark.cn-beijing.volces.com/api/v3/...` |
-| `${ENV:SEEDANCE_CACHE_DIR}` | 本地任务缓存目录 | `${HOME}/.cache/seedance-mcp` |
 | `${ENV:FILE_HOST}` | 本地文件上传服务 | `uguu.se` / `0x0.st` / 自建 |
 | `${ENV:SEEDANCE_MODEL_DEFAULT}` | 默认模型 | （具体值以 provider 文档为准） |
+
+> ⚠️ 2026-06-13 起 `SEEDANCE_CACHE_DIR` 环境变量已废（本地 cache 删了）。
 
 ### MCP server 注册（按 agent 平台）
 
@@ -351,7 +352,7 @@ ffmpeg -y -sseof -0.1 -i input.mp4 -vframes 1 frame_end.jpg
 
 | ❌ 不写（反例占位） | ✅ 写（占位符版） |
 |--------|---------|---------|
-| 缓存文件绝对路径 | `${ENV:SEEDANCE_CACHE_DIR}/tasks.jsonl` |
+| 缓存文件绝对路径 | （已废 · 2026-06-13 cache 删除） |
 | 具体模型 ID | `${ENV:SEEDANCE_MODEL_DEFAULT}` |
 | 具体 profile 名 | "任意 agent profile，按部署" |
 | 具体金额数字 | "duration × resolution × model 决定，参考 ${PROVIDER_PRICING_URL}" |
@@ -368,10 +369,8 @@ ffmpeg -y -sseof -0.1 -i input.mp4 -vframes 1 frame_end.jpg
 |---------|---------|---------|---------|
 | **0 元连通性验证** | ❌ 0 元 | 无 | `{valid: bool, total: int}` |
 | **提交视频生成** | ✅ 真扣费 | `prompt` + `duration` | `{task_id, status: queued/running}` |
-| **查询任务状态** | ❌ 0 元 | `task_id` | `{status, video_url, url_ttl_sec}` |
+| **查询任务状态** | ❌ 0 元 | `task_id` | `{status, video_url}` |
 | **同步等待+下载** | ❌ 0 元 | `task_id` + `output_path` | `{output_path, size_bytes, md5}` |
-| **本地缓存查询** | ❌ 0 元 | `limit` (可选) | `[{task_id, status, video_url, ...}]` |
-| **缓存命中下载** | ❌ 0 元 | `task_id` | mp4 bytes（同上） |
 
 > **关键提醒**：**实际工具名** = `MCP server list_tools()` 返回值（可能跟默认命名不同）。
 > skill 不硬编码具体工具名，**只**匹配 `mcp_seedance_*` 前缀 + 用意图判断。

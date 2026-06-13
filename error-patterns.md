@@ -44,14 +44,14 @@
 - **首尾帧范式 = 禁用**（绘本场景）——`--image` + `--last-frame` 必翻车
 - **`generate_audio: false` 是绘本场景的默认**——`True` 会让 AI 生成莫名说话声
 - **范式号（v7 / v15 / picN）= 已废**——v1.0.0 起只按场景路由（领读/押韵/短句/故事/知识）
-- **同 prompt 不重提**——`list_recent_tasks` 查本地缓存，**已发任务 = 已扣费**
+- **同 prompt 不重提**——`seedance.py status <task_id>` / `seedance.py list --page-size N` 查官方 API，**已发任务 = 已扣费**
 
-### 缓存
+### 缓存（2026-06-13 起 = 已删）
 
-- **位置**：`~/.cache/seedance-mcp/tasks.jsonl`（`SEEDANCE_CACHE_DIR` 可覆盖）
-- **格式**：append-only JSONL（并发安全，10 并发 0 丢失已验证）
-- **TTL 自适应**：从 `video_url` 的 `X-Tos-Expires` 读，不硬编码 24h
-- **失败也写**——"已发任务 = 已扣费"，避免 agent 误判为没跑过
+- **本地 cache 已删**——不存在 `~/.cache/seedance-mcp/tasks.jsonl`，`SEEDANCE_CACHE_DIR` 环境变量无效
+- **历史背景**：原 cache 是为了跨 session 查 task_id，但官方 ark list 端点（`GET /tasks?page_size=N`）同样能查，且不会滞后
+- **唯一权威信源**：官方 ark API（`GET /tasks/{id}` + `GET /tasks?page_size=N`）
+- **唯一缓存机制**：video_url 24h 有效（平台控制），过期调 `status` 拿新 URL
 
 ### 翻车自检（必跑）
 

@@ -147,8 +147,8 @@ result = U.ark_request('POST', U.ARK_BASE_URL, {
 })
 task_id = result['id']
 
-# 缓存写入
-U.cache_task(task_id=task_id, status='queued', duration=4, ratio='16:9')
+# ⚠️ 2026-06-13 起本地缓存已删：无需 U.cache_task 调用
+# 需要查历史任务 → `seedance.py list --page-size N` 走官方 list 端点
 ```
 
 ---
@@ -167,7 +167,7 @@ export https_proxy="http://127.0.0.1:7897"
 **常见 3 个网络错**（详见 [TROUBLESHOOTING.md](./TROUBLESHOOTING.md)）：
 - 🔴 `SSL: UNEXPECTED_EOF_WHILE_READING` → 走代理访问 uguu.se
 - 🟠 `API key format is incorrect` → .env 被 hermes redact，重新填真值
-- 🟡 `task not found` → 24h 后 URL 过期，用 list_recent_tasks 查本地缓存
+- 🟡 `task not found` → 24h 后 URL 过期，调官方 `GET /api/v3/contents/generations/tasks/{id}` 拿新 URL
 
 ---
 
@@ -180,7 +180,7 @@ export https_proxy="http://127.0.0.1:7897"
 | `watermark: true` | `none` / `False` | 绘本不要 AI 水印 |
 | `--image` + `--last-frame` | `--ref-images1.jpg 2.jpg` | 首尾帧范式绘本翻车 |
 | 跳过 vision 自检 | 4 帧抽帧 + 6 翻车征兆 | 翻车 = 文字消失/角色突变 |
-| 同 prompt 重提 | list_recent_tasks 查缓存 | 已扣费 = 已扣费 |
+| 同 prompt 重提 | `seedance.py list` + `seedance.py status <id>` 查历史 | 已扣费 = 已扣费 |
 
 详见 [SKILL.md §范式禁令](./SKILL.md)。
 

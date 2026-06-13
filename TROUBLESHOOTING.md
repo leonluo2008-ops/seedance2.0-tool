@@ -135,29 +135,22 @@ for r in cache:
 **修复 B**：
 
 ```python
-# 用 list_recent_tasks（不调 API）+ download_cached（fallback 到 check_task 拿新 URL）
+# 2026-06-13 本地缓存已删：直接调官方 ark 端点拿新 URL
 import asyncio
 import mcp_server
 
-async def fix():
-    # 查缓存
-    cache = mcp_server._read_cache(50)
-    target = next((r for r in cache if r['task_id'] == 'cgt-...'), None)
-    if not target:
-        print("不在缓存里——需要重新提交")
-        return
-    
-    if target.get('url_expired_by_local_clock'):
-        # 重新查 task 拿新 URL
-        r = await mcp_server._ark_request_async('GET', f"{mcp_server.ARK_BASE_URL}/{target['task_id']}")
-        if r['status'] == 'succeeded':
-            new_url = r['content']['video_url']
-            mcp_server._cache_task(task_id=target['task_id'], status='succeeded', video_url=new_url)
-            print(f"new URL: {new_url[:80]}")
+async def fix(task_id: str):
+    # 调官方 API（直连 ark.cn-beijing.volces.com，不依赖本地 cache）
+    r = await mcp_server._ark_request_async('GET', f"{mcp_server.ARK_BASE_URL}/{task_id}")
+    if r['status'] == 'succeeded':
+        new_url = r['content']['video_url']
+        print(f"new URL: {new_url[:80]}")
+        return new_url
     else:
-        print(f"URL 还有效: {target['video_url'][:80]}")
+        print(f"task 当前状态: {r['status']}")
+        return None
 
-asyncio.run(fix())
+asyncio.run(fix('cgt-...'))
 ```
 
 ---

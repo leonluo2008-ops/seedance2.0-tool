@@ -39,9 +39,7 @@ nano .env  # 或 vim / VSCode
 # 获取地址：https://console.volcengine.com/ark
 ARK_API_KEY=你的真实_key
 
-# 可选：本地任务缓存目录
-# 默认 ~/.cache/seedance-mcp（推荐不改）
-# SEEDANCE_CACHE_DIR=/path/to/cache
+# ⚠️ 2026-06-13 起本地缓存已删，SEEDANCE_CACHE_DIR 环境变量不再需要
 ```
 
 **⚠️ 不要 commit `.env` 到 git**（仓库 `.gitignore` 已配）。
@@ -92,7 +90,7 @@ python3 seedance.py create \
 
 **如果报错**：
 - 🟠 `task failed` → 看 [TROUBLESHOOTING.md](./TROUBLESHOOTING.md) §任务失败
-- 🟡 `URL expired` → 24h 后再用 `list_recent_tasks` 找缓存
+- 🟡 `URL expired` → 24h 后重新调 `seedance.py status <task_id>` 拿新 URL
 
 ## 🎉 完成！
 

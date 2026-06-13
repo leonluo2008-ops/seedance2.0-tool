@@ -26,17 +26,16 @@ API 层：
   - build_content(args, resolved_urls=None) 构造 Ark content 数组
   - build_body(args, resolved_urls=None) 构造 Ark body（含 watermark 字符串→bool 映射）
 
-缓存层：
-  - cache_task(task_id, status, video_url, **extra) append-only JSONL
-  - read_cache(limit) 读 + dedup
-  - parse_url_expires(video_url) 从 X-Tos-Expires 读 TTL
-  - check_url_expired(video_url) 简单过期判定
+下载层：
+  - download_video(url, output_path) 同步下载（urllib）
 
 环境变量：
   - ARK_API_KEY         必填，火山引擎鉴权
-  - SEEDANCE_CACHE_DIR  可选，默认 ~/.cache/seedance-mcp
 
 变更记录：
+  - 2026-06-13 删除本地 cache 机制（cache_task / read_cache / parse_url_expires / check_url_expired /
+    CACHE_DIR / CACHE_FILE / CACHE_TTL_FALLBACK_SEC 全部移除）
+    官方文档（volcengine.com/docs/82379/1520757）仅 2 个权威端点，本地 cache 无存在必要
   - 2026-06-11 v1.0 从 mcp_server.py + seedance.py 抽出
 """
 import os
@@ -44,7 +43,6 @@ import sys
 import json
 import time
 import asyncio
-import re
 import hashlib
 import ssl
 import urllib.request
@@ -64,9 +62,8 @@ UGUU_UPLOAD_URL = "https://uguu.se/upload.php"
 DEFAULT_MODEL = "doubao-seedance-2-0-fast-260128"
 UA = "SeedanceMCP/0.1.0"
 
-CACHE_DIR = Path(os.environ.get("SEEDANCE_CACHE_DIR", os.path.expanduser("~/.cache/seedance-mcp")))
-CACHE_FILE = CACHE_DIR / "tasks.jsonl"
-CACHE_TTL_FALLBACK_SEC = 24 * 3600  # 平台 URL TTL 字段缺失时兜底 24h
+# CACHE_DIR / CACHE_FILE / CACHE_TTL_FALLBACK_SEC 已删（2026-06-13 移除本地 cache 机制）
+# 官方文档（volcengine.com/docs/82379/1520757）仅提供 2 个权威端点，不需要本地 cache
 
 
 _MIME_BY_EXT = {
@@ -483,82 +480,6 @@ def build_body(args: dict, resolved_urls: dict = None) -> dict:
     if args.get("service_tier"):
         body["service_tier"] = args["service_tier"]
     return body
-
-
-# ===== 任务缓存（铁律 30 升级：append-only JSONL + 平台 URL TTL 自适应）=====
-
-def _ensure_cache_dir():
-    CACHE_DIR.mkdir(parents=True, exist_ok=True)
-
-
-def parse_url_expires(video_url: str) -> int:
-    """从 video_url query string 解析 X-Tos-Expires（秒）。失败返回 24h fallback。"""
-    if not video_url:
-        return CACHE_TTL_FALLBACK_SEC
-    m = re.search(r'X-Tos-Expires=(\d+)', video_url)
-    if m:
-        try:
-            return int(m.group(1) or 0) or CACHE_TTL_FALLBACK_SEC
-        except (ValueError, TypeError):
-            pass
-    return CACHE_TTL_FALLBACK_SEC
-
-
-def cache_task(task_id: str, status: str, video_url: "str | None" = None, **extra) -> dict:
-    """写一条任务到本地 JSONL 缓存。"""
-    _ensure_cache_dir()
-    now = int(time.time())
-    record = {
-        "task_id": task_id,
-        "status": status,
-        "cached_at": now,
-        "cached_at_iso": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now)),
-        **extra,
-    }
-    if video_url:
-        ttl = parse_url_expires(video_url)
-        record["video_url"] = video_url
-        record["url_ttl_sec"] = ttl
-        record["url_expires_at"] = now + ttl
-        record["url_expires_at_iso"] = time.strftime(
-            "%Y-%m-%dT%H:%M:%SZ", time.gmtime(now + ttl)
-        )
-    with open(CACHE_FILE, "a", encoding="utf-8") as f:
-        f.write(json.dumps(record, ensure_ascii=False) + "\n")
-    return record
-
-
-def read_cache(limit: int = 50) -> list:
-    """读本地缓存（最新 limit 条）。相同 task_id 取最后一条（去重）。"""
-    if not CACHE_FILE.exists():
-        return []
-    seen = {}
-    with open(CACHE_FILE, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                rec = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            seen[rec["task_id"]] = rec
-    return sorted(seen.values(), key=lambda r: r.get("cached_at", 0), reverse=True)[:limit]
-
-
-def check_url_expired(video_url: str) -> bool:
-    """检查 video_url 是否已过期（用本地时间，不调 API）。"""
-    if not video_url:
-        return True
-    ttl = parse_url_expires(video_url)
-    m_date = re.search(r'X-Tos-Date=(\d{8}T\d{6}Z)', video_url)
-    if m_date:
-        try:
-            signed_at = time.mktime(time.strptime(m_date.group(1), "%Y%m%dT%H%M%SZ"))
-            return (time.time() - signed_at) > ttl
-        except ValueError:
-            pass
-    return True
 
 
 # ===== 视频下载 =====

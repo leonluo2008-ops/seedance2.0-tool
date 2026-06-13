@@ -126,12 +126,8 @@ result = U.ark_request("POST", U.ARK_BASE_URL, body)
 task_id = result["id"]
 print(f"Task ID: {task_id}")
 
-# 4. 写本地缓存（铁律 30 升级：已发任务 = 已扣费，本地必有记录）
-U.cache_task(
-    task_id=task_id, status=result.get("status", "queued"),
-    duration=4, ratio="16:9", resolution="480p",
-    model=U.DEFAULT_MODEL, source="my_agent",
-)
+# 4. ⚠️ 2026-06-13 起本地缓存已删：无需 U.cache_task 调用
+# 需要查历史 → 调官方 list 端点：`U.ark_request("GET", f"{U.ARK_BASE_URL}?page_size=N")`
 
 # 5. 轮询 + 下载（自己写或用 wait_and_download 异步版）
 import time
@@ -155,7 +151,7 @@ while True:
 | **上手难度** | ⭐ 最易 | ⭐⭐ 中 | ⭐⭐⭐ 灵活 |
 | **适合场景** | 临时跑 1 段 / 调试 | LLM agent 集成 | 自建工作流 / 批量 |
 | **状态查询** | 子命令 | 工具 | 自己写 |
-| **缓存** | 自动 | 自动 | 自己调 `cache_task()` |
+| **缓存** | ❌ 已删（2026-06-13 走官方 API） | ❌ 已删 | 自己调 ark list 端点 |
 | **轮询** | `--wait` 自动 | `wait_and_download` 工具 | 自己 `time.sleep` |
 
 ## 🔥 下一个

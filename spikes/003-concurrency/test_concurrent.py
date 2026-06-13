@@ -5,10 +5,12 @@ spike 003: 并发任务测试（0 成本版 · 修订）
 修订动机：用户反馈「不要总是提交任务，每次提交都是成本」。
 本测试**只**真跑 1 次（baseline 4s 480p），其余并发场景用 mock / 本地时间模拟。
 
-测 3 件事：
+测 2 件事：
 1. asyncio.gather + 同步 urllib 是否真并发（5 个 noop vs 5 个真实 API）
-2. 本地缓存并发写：10 个并发 _cache_task — JSONL 是否丢数据 / 错位
-3. 服务端 3 并发限制验证：只查 list 端点，不发新任务
+2. 服务端 3 并发限制验证：只查 list 端点，不发新任务
+
+修订记录：
+- 2026-06-13 删除"本地缓存并发写"测试（test 2）—— cache 已废
 """
 import asyncio
 import sys
@@ -57,39 +59,6 @@ async def test_concurrency_is_real():
         verdict = "⚠️ 可能假并发 / 网络慢"
     print(f"  {verdict}")
     return list_time
-
-
-# ===== Test 2: 本地缓存并发写（0 成本）=====
-async def test_concurrent_cache_writes(n: int = 10):
-    """10 个并发 _cache_task 写同一 JSONL"""
-    print()
-    print(f"=== Test 2: {n} 个并发 _cache_task（0 成本）===")
-    t0 = time.time()
-    tasks = [asyncio.to_thread(
-        mcp_server._cache_task,
-        task_id=f"test-concurrent-{i}",
-        status="running",
-        duration=4,
-    ) for i in range(n)]
-    await asyncio.gather(*tasks)
-    elapsed = time.time() - t0
-    print(f"  写入完成，耗时 {elapsed:.3f}s")
-
-    records = mcp_server._read_cache(limit=200)
-    test_records = [r for r in records if r['task_id'].startswith('test-concurrent-')]
-    print(f"  缓存里 test-concurrent-* 记录数: {len(test_records)}（期望 {n}）")
-    status = "✅ 10 条全在" if len(test_records) == n else f"❌ 数据丢失/错位"
-    print(f"  {status}")
-
-    # 清理
-    if mcp_server.CACHE_FILE.exists():
-        with open(mcp_server.CACHE_FILE) as f:
-            lines = f.readlines()
-        with open(mcp_server.CACHE_FILE, 'w') as f:
-            for line in lines:
-                if 'test-concurrent-' not in line:
-                    f.write(line)
-        print(f"  清理 OK")
 
 
 # ===== Test 3: 服务端 3 并发限制（不提交，只查 list 端点）=====
@@ -209,8 +178,7 @@ async def main():
     # Test 1
     await test_concurrency_is_real()
 
-    # Test 2
-    await test_concurrent_cache_writes(n=10)
+    # Test 2 已删（2026-06-13 · cache 已废）
 
     # Test 3
     await test_service_3_concurrent_limit_via_list()

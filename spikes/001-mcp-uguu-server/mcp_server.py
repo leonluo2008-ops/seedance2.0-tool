@@ -34,40 +34,13 @@ import httpx
 from pathlib import Path
 from typing import Any
 
-# ===== 任务本地缓存（铁律 30 升级：append-only JSONL + 平台 URL TTL 同步）=====
-# 缓存文件位置：MCP server 持久目录，跨 session/重启可查
-# 写入时机：generate_video 成功 / check_task 拿到 succeeded / wait_and_download 完成
-# TTL 策略：从 video_url 的 X-Tos-Expires 字段读，**不**硬编码 24h（未来平台改 1h 自动适配）
-CACHE_DIR = Path(os.environ.get("SEEDANCE_CACHE_DIR", "/home/luo/.cache/seedance-mcp"))
-CACHE_FILE = CACHE_DIR / "tasks.jsonl"
-CACHE_TTL_FALLBACK_SEC = 24 * 3600  # 平台 URL TTL 字段缺失时的兜底（24h）
-
-
 # ===== 业务函数委托给 seedance_uploads（单真源）=====
-# 所有上传 / Ark API / 缓存 / body 构造逻辑都在 ../seedance_uploads.py
+# 所有上传 / Ark API / body 构造逻辑都在 ../seedance_uploads.py
 # 本文件只在 MCP protocol 层面加壳（list_tools / call_tool）
+# 2026-06-13 移除本地 cache（cache_task / parse_url_expires / read_cache / _ensure_cache_dir / _check_url_expired）
+# 全部缓存相关函数已删，调用方改用官方 ark list 端点
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 import seedance_uploads as U  # noqa: E402
-
-
-def _ensure_cache_dir():
-    return U._ensure_cache_dir()
-
-
-def _parse_url_expires(video_url: str) -> int:
-    return U.parse_url_expires(video_url)
-
-
-def _cache_task(task_id: str, status: str, video_url: "str | None" = None, **extra):
-    return U.cache_task(task_id, status, video_url=video_url, **extra)
-
-
-def _read_cache(limit: int = 50) -> list:
-    return U.read_cache(limit)
-
-
-def _check_url_expired(video_url: str) -> bool:
-    return U.check_url_expired(video_url)
 
 
 def _upload_to_uguu(local_path: str, mime_type: str) -> str:
@@ -237,46 +210,9 @@ async def list_tools() -> list[types.Tool]:
             description="0 元 list 端点检测 API key 有效性（不扣费）。",
             inputSchema={"type": "object", "properties": {}},
         ),
-        types.Tool(
-            name="list_recent_tasks",
-            description=(
-                "查询本地缓存的历史任务（不调 API，0 元）。\n"
-                "⚠️ 已发任务 = 已扣费，绝不重提交。本工具用于查过往 task_id。\n\n"
-                "TTL 策略：本地缓存的视频 URL 保留期 **跟平台一致** —— "
-                "从 video_url 的 X-Tos-Expires 字段读取（当前 86400s = 24h），"
-                "如果未来平台改 1h，本工具自动同步。\n\n"
-                "返回字段：\n"
-                "  - task_id / status / cached_at\n"
-                "  - video_url / url_ttl_sec / url_expires_at / url_expired_by_local_clock\n"
-                "  - local_path（如果之前 wait_and_download 过）\n"
-                "  - duration / ratio / resolution / model"
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "limit": {"type": "integer", "default": 20, "maximum": 100,
-                              "description": "返回最近 N 条"},
-                    "include_expired_urls": {"type": "boolean", "default": True,
-                                             "description": "是否包含 url_expired_by_local_clock=true 的记录"},
-                },
-            },
-        ),
-        types.Tool(
-            name="download_cached",
-            description=(
-                "用本地缓存的 video_url 下载（不调 list 端点）。\n"
-                "⚠️ URL 可能已过期——若已过期自动 fallback 到 check_task 重新拿新 URL。\n"
-                "推荐用法：先 list_recent_tasks → 拿 task_id → download_cached"
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "task_id": {"type": "string", "description": "从 list_recent_tasks 拿到的 task_id"},
-                    "output_path": {"type": "string", "description": "本地保存路径（.mp4）"},
-                },
-                "required": ["task_id", "output_path"],
-            },
-        ),
+        # ⚠️ 2026-06-13 删除 list_recent_tasks + download_cached 工具（基于本地 cache，
+        # cache 已删，工具失效）。如需"列最近任务"功能，后续调官方 list 端点
+        # (`seedance.py list` 或 MCP 加新工具)
     ]
 
 
@@ -291,16 +227,7 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
             task_id = result.get("id")
             if not task_id:
                 raise RuntimeError(f"no task_id in response: {result}")
-            # ⚠️ 写本地缓存（铁律 30 升级：已发任务 = 已扣费，本地必须有记录）
-            _cache_task(
-                task_id=task_id,
-                status=result.get("status", "queued"),
-                duration=body["duration"],
-                ratio=body["ratio"],
-                resolution=body.get("resolution"),
-                model=body["model"],
-                source="generate_video",
-            )
+            # ⚠️ 2026-06-13 移除 _cache_task 调用：本地 cache 已删，需要查历史 = 走官方 list 端点
             return [types.TextContent(
                 type="text",
                 text=json.dumps({
@@ -316,7 +243,8 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
         elif name == "check_task":
             task_id = arguments["task_id"]
             result = await _ark_request_async("GET", f"{ARK_BASE_URL}/{task_id}", timeout=30)
-            # 标准化输出
+            # 标准化输出（2026-06-13 移除 url_ttl_sec / url_expired_by_local_clock：
+            # 这俩依赖 parse_url_expires / check_url_expired（已删）。需要时 client 自己判断 URL 是否过期）
             out = {
                 "task_id": task_id,
                 "status": result.get("status"),
@@ -327,21 +255,10 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
             video_url = content.get("video_url")
             if video_url:
                 out["video_url"] = video_url
-                ttl = _parse_url_expires(video_url)
-                out["url_ttl_sec"] = ttl
-                out["url_expired_by_local_clock"] = _check_url_expired(video_url)
-                out["_note"] = f"video_url TTL={ttl}s（来自 X-Tos-Expires），及时下载。"
+                out["_note"] = "video_url 24h 有效，及时下载。过期调 check_task 拿新 URL。"
             if result.get("error"):
                 out["error"] = result["error"]
-            # ⚠️ 写本地缓存（铁律 30 升级：跨 session 可查）
-            _cache_task(
-                task_id=task_id,
-                status=result.get("status", "unknown"),
-                video_url=video_url,
-                duration=result.get("duration"),
-                ratio=result.get("ratio"),
-                resolution=result.get("resolution"),
-            )
+            # ⚠️ 2026-06-13 移除 _cache_task 调用
             return [types.TextContent(type="text", text=json.dumps(out, ensure_ascii=False, indent=2))]
 
         elif name == "wait_and_download":
@@ -367,18 +284,7 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
                     out_p.parent.mkdir(parents=True, exist_ok=True)
                     with open(out_p, "wb") as f:
                         f.write(data)
-                    # ⚠️ 写本地缓存（铁律 30 升级）
-                    _cache_task(
-                        task_id=task_id,
-                        status="succeeded",
-                        video_url=video_url,
-                        duration=result.get("duration"),
-                        ratio=result.get("ratio"),
-                        resolution=result.get("resolution"),
-                        local_path=str(out_p),
-                        size_bytes=len(data),
-                        md5=hashlib.md5(data).hexdigest(),
-                    )
+                    # ⚠️ 2026-06-13 移除 _cache_task 调用（wait_and_download 完成后不再写 cache）
                     return [types.TextContent(
                         type="text",
                         text=json.dumps({
@@ -387,13 +293,11 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
                             "output_path": str(out_p),
                             "size_bytes": len(data),
                             "md5": hashlib.md5(data).hexdigest(),
-                            "url_ttl_sec": _parse_url_expires(video_url),
                         }, ensure_ascii=False, indent=2),
                     )]
                 elif status == "failed":
                     err = result.get("error", {})
-                    # 失败也写缓存（"已发任务 = 已扣费"，不要让 agent 误以为没跑过）
-                    _cache_task(task_id=task_id, status="failed", error=err)
+                    # ⚠️ 2026-06-13 移除 _cache_task 调用（失败也不再写 cache）
                     raise RuntimeError(f"task failed: {err}")
                 time.sleep(poll)
             raise RuntimeError(f"timeout after {timeout}s")
@@ -412,76 +316,6 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
                     "valid": False,
                     "error": str(e),
                 }, ensure_ascii=False, indent=2))]
-
-        elif name == "list_recent_tasks":
-            limit = arguments.get("limit", 20)
-            include_expired = arguments.get("include_expired_urls", True)
-            records = _read_cache(limit=limit)
-            if not include_expired:
-                records = [r for r in records if not r.get("url_expired_by_local_clock", False)]
-            # 标准化 + 加过期标记
-            for r in records:
-                if r.get("video_url"):
-                    r["url_expired_by_local_clock"] = _check_url_expired(r["video_url"])
-            return [types.TextContent(
-                type="text",
-                text=json.dumps({
-                    "count": len(records),
-                    "cache_file": str(CACHE_FILE),
-                    "tasks": records,
-                }, ensure_ascii=False, indent=2),
-            )]
-
-        elif name == "download_cached":
-            task_id = arguments["task_id"]
-            output_path = arguments["output_path"]
-            # 从缓存拿 video_url
-            cache = {r["task_id"]: r for r in _read_cache(limit=200)}
-            rec = cache.get(task_id)
-            video_url = rec.get("video_url") if rec else None
-            url_expired = _check_url_expired(video_url) if video_url else True
-
-            # fallback：如果缓存没有 / URL 已过期 → 调 check_task 拿新 URL
-            if not video_url or url_expired:
-                result = await _ark_request_async("GET", f"{ARK_BASE_URL}/{task_id}", timeout=30)
-                video_url = result.get("content", {}).get("video_url")
-                if not video_url:
-                    raise RuntimeError(f"task {task_id} 无 video_url（可能仍 running/failed: {result.get('status')}）")
-                # 更新缓存
-                _cache_task(
-                    task_id=task_id,
-                    status=result.get("status", "unknown"),
-                    video_url=video_url,
-                    duration=result.get("duration"),
-                    ratio=result.get("ratio"),
-                    resolution=result.get("resolution"),
-                )
-                fallback_used = True
-            else:
-                fallback_used = False
-
-            # 下载（用 httpx async，替代 sync urllib）
-            client = await _get_http_client()
-            dl_resp = await client.get(video_url, timeout=120)
-            dl_resp.raise_for_status()
-            data = dl_resp.content
-            out_p = Path(output_path)
-            out_p.parent.mkdir(parents=True, exist_ok=True)
-            with open(out_p, "wb") as f:
-                f.write(data)
-            return [types.TextContent(
-                type="text",
-                text=json.dumps({
-                    "task_id": task_id,
-                    "output_path": str(out_p),
-                    "size_bytes": len(data),
-                    "md5": hashlib.md5(data).hexdigest(),
-                    "url_ttl_sec": _parse_url_expires(video_url),
-                    "url_was_expired_before_download": url_expired,
-                    "api_fallback_used": fallback_used,
-                    "_note": "url 过期时已自动 fallback 到 check_task 拿新 URL。",
-                }, ensure_ascii=False, indent=2),
-            )]
 
         else:
             raise ValueError(f"unknown tool: {name}")

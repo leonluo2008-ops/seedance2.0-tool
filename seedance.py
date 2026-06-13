@@ -13,7 +13,7 @@ Seedance 2.0 Tool - 视频生成工具 CLI（统一图床：uguu.se）
 
 环境变量：
     ARK_API_KEY         : Volcengine Ark API Key（必填）
-    SEEDANCE_CACHE_DIR  : 本地任务缓存目录（可选，默认 ~/.cache/seedance-mcp）
+    # 2026-06-13 起 SEEDANCE_CACHE_DIR 已废（本地 cache 删除）
 
 变更记录：
 - 2026-06-11 v1.0 迁移到 uguu.se + httpx async + 任务缓存
@@ -111,13 +111,6 @@ def cmd_create(args):
 
     print(f"Task ID: {task_id}")
 
-    # 写本地缓存（spike 002 升级：跨 session 可查）
-    U.cache_task(
-        task_id=task_id, status=result.get("status", "queued"),
-        duration=body["duration"], ratio=body["ratio"], resolution=body.get("resolution"),
-        model=body["model"], source="seedance_cli",
-    )
-
     if args.wait:
         print("Waiting for completion...")
         result = wait_for_completion(task_id)
@@ -132,16 +125,6 @@ def cmd_create(args):
             else:
                 print("Warning: No video_url in result", file=sys.stderr)
                 print(json.dumps(result, indent=2, ensure_ascii=False))
-
-        # 成功后更新缓存（含 video_url + TTL）
-        video_url = result.get("content", {}).get("video_url")
-        U.cache_task(
-            task_id=task_id, status=result.get("status", "succeeded"),
-            video_url=video_url,
-            duration=result.get("duration"), ratio=result.get("ratio"),
-            resolution=result.get("resolution"),
-            local_path=args.download if args.download else None,
-        )
 
         print(f"\n✅ Task completed: {task_id}")
         print(json.dumps(result, indent=2, ensure_ascii=False))
@@ -217,13 +200,8 @@ def cmd_status(args):
         )
 
     print(json.dumps(result, indent=2, ensure_ascii=False))
-    # 写缓存
-    U.cache_task(
-        task_id=args.task_id, status=result.get("status", "unknown"),
-        video_url=result.get("content", {}).get("video_url"),
-        duration=result.get("duration"), ratio=result.get("ratio"),
-        resolution=result.get("resolution"),
-    )
+    # 本地缓存已删（2026-06-13）：状态查询不再写 cache，避免 kangaroo 报告里
+    # "MCP 缓存滞后于真实状态"的根因。需要查历史 = `seedance.py list` 走官方 list 端点
 
 
 def cmd_list(args):
@@ -356,7 +334,7 @@ Examples:
 
 Environment variables:
   ARK_API_KEY         : Volcengine Ark API Key（必填）
-  SEEDANCE_CACHE_DIR  : 本地任务缓存目录（可选，默认 ~/.cache/seedance-mcp）
+  # 2026-06-13 起 SEEDANCE_CACHE_DIR 已废（本地 cache 删除）
 """)
 
     subparsers = parser.add_subparsers(dest="command", help="Commands")
