@@ -502,6 +502,47 @@ CHEVERETO_API_KEY=your-chevereto-api-key
 
 > ⚠️ **chevereto 不支持音频**（默认 mime 白名单只接 image/*）—— mp3 必须用 uguu.se 替代（见 `references/audio-bugs-and-hosting.md` §"mp3 音频必须走公网直链"）。
 
+## MCP 工具（首选 · 替代 seedance.py CLI）⭐⭐⭐ 2026-06-11 接入
+
+**MCP server 自动把以下 4 个工具注册为 `mcp_seedance_*` 前缀**（绘本 agent 工具列表里直接可见）：
+
+| 工具 | 用途 | 替代 seedance.py 子命令 | 触发词 |
+|------|------|------------------------|--------|
+| `mcp_seedance_generate_video` | 提交任务，返回 task_id | `seedance.py create`（不传 `--wait`）| "生成视频" / "跑一段" / "提交任务" |
+| `mcp_seedance_check_task` | 查询任务状态（**已发任务 = 已扣费 = 绝不重提交**）| `seedance.py status <task_id>` | "查任务" / "看进度" |
+| `mcp_seedance_wait_and_download` | 同步等待 + 自动下载（绘本单 clip 场景）| `seedance.py wait` + `seedance.py download` | "等完成" / "拿到视频" |
+| `mcp_seedance_verify_api_key` | 0 元 list 端点检测（key 验通）| （无 CLI 等价）| "验 key" / "key 有效吗" |
+
+**调用规则（绘本 agent 必守 · 来自 conductor skill v0.1）**：
+
+- **duration 必须是整数**（避开 argparse `"7.5"` → `invalid int` 坑；inputSchema 强制 `type: integer`）
+- **duration [4, 15] 硬限制**（API 物理上限，inputSchema 写死）
+- **watermark 默认 `"none"`**（绘本场景专精；原 seedance.py 默认 true 是坑，**绝对不要**覆盖为平台水印）
+- **generate_audio 默认 `False`**（绘本场景无声更纯净；如需 BGM 显式传 `True`）
+- **resolution 默认 `"720p"`**（spike 阶段 `480p` 验证；生产用 720p）
+- **model 默认 `doubao-seedance-2-0-fast-260128`**（性价比；如需高质量传 `doubao-seedance-2-0-260128`）
+- **ratio 默认 `16:9`**（绘本横版）
+- **参数透传铁律**：MCP server 用 `if "X" in args` 而非 `args.get("X", default)`——agent 传什么用什么，agent 没传才用 MCP 默认值。**绝不要**在 MCP server 里把 agent 传的 None 隐式吞掉
+
+**当前 MCP server 状态（2026-06-11 Cherry 报告后 · 绘本 agent 必看）**：
+
+✅ **已就绪**：
+- MCP server 代码：`spikes/001-mcp-uguu-server/mcp_server.py`（**注意**在 spike 目录里、不是仓库根）
+- 业务函数（单真源）：`seedance_uploads.py`（648 行，与 seedance.py 共享）
+- Python 依赖：`mcp 1.27.0` 已在 `/home/luo/.hermes/hermes-agent/venv/lib/python3.11/site-packages/`
+- 注册位置：`~/.hermes/profiles/huiben/config.yaml` `mcp_servers.seedance` 段（profile 级生效）
+- 重启 hermes 后工具列表重载可见
+
+⚠️ **前置条件**：
+- **绘本 agent 实际使用的仓**是 profile 仓：`~/.hermes/profiles/huiben/skills/creative/seedance2.0-tool/`
+- **必须切到 `feat/mcp-uguu-server` 分支**（`a9cdd34` 才有 mcp_server.py + seedance_uploads.py）
+- **main 分支 = 生产版本，absolute NO merge**（用户红线 2026-06-11）
+- ARK_API_KEY 自动从 skill 仓 `.env` 文件加载（不通过 config.yaml 注入）
+
+**回退路径（仅 MCP 不可用时）**：
+- uguu.se 图床 + curl ark API（`scripts/uguu_ark_fallback.py` 是当前回退实现，参考 `references/public-file-hosting-fallback.md`）
+- Cherry 绘本 4/4 视频用此路径成功生成（task_id 在 `~/.hermes/profiles/huiben/work/20260611-cherry-input/task_ids.json`）
+
 ## 核心用法
 
 ### 1. 文生视频（纯文字）
@@ -1316,14 +1357,19 @@ python3 /home/luo/.hermes/profiles/huiben/skills/creative/seedance2.0-tool/seeda
 # 创建视频任务
 python3 seedance.py create [options]
 
-# 查询任务状态
+# 查询任务状态（含长跑 hint · 不判卡死 — 30 分钟阈值）
 python3 seedance.py status <task_id>
+
+# 列出最近 N 条任务（含长跑标记 · 不判卡死）
+python3 seedance.py list [--page-size 10]
 
 # 等待任务完成
 python3 seedance.py wait <task_id> [--download <path>]
 ```
 
-> ⚠️ **CLI 缺失 list/delete**：SKILL.md 历史版本提到过 `list` 和 `delete` 子命令，但实际 CLI（v1.0.44）只有 `create/status/wait` 三个。任务列表**无法用 CLI 查**。
+> ✅ **2026-06-13 新增 list 子命令**：CLI 历史上缺 `list`，2026-06-13 用 `cmd_list` 补上（含长跑标记列）。`list` 是排查"任务为什么没完成"的**首选入口**——同批次任务状态一眼对比，比单点 `status` 信息密度高得多。
+>
+> **长跑 hint 行为**（2026-06-13）：`status` 子命令在 `status=running/pending` + `updated_at==created_at`（API 设计如此）+ **超过 30 分钟**时打 💡 hint，**不**断言卡死；提示内容是建议跑 `list` 看相邻任务对比。这跟 2026-06-10 实战沉淀的"`updated_at` 不动 ≠ 卡死"铁律完全一致——30 分钟阈值就是按 qg6cg 19 分钟 + 余裕定的。
 
 **救命通道 · ark REST list 端点**（task ID 丢失时使用）：
 

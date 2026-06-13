@@ -25,6 +25,7 @@ Seedance 2.0 Tool - 视频生成工具 CLI（统一图床：uguu.se）
   - seed/camera_fixed/draft/return_last_frame/service_tier 全部顶层（**不**嵌套 parameters）
 """
 import argparse
+import datetime
 import json
 import os
 import sys
@@ -149,13 +150,72 @@ def cmd_create(args):
         print("Use 'seedance.py status <task_id>' to check progress.")
 
 
+# ============ 长跑提示（updated_at == created_at 但 status 仍是 running，超阈值提示）============
+# 2026-06-10 Pic8 Rabbit Clip4 (qg6cg) 实战沉淀：updated_at 不动是 API 设计，**不**等于卡死
+# 长生成耗时是正常的（实测 2-20 分钟，复杂 prompt 可达 19+ 分钟）
+# 唯一正确判读：对比相邻任务 — 同批次其他 succeeded = 平台 OK；本任务单点超时 = 排查 prompt/资源
+# 阈值：30 分钟（qg6cg 19 分钟 + 余裕）才提示；不构成"卡死"断言，仅 hint
+LONG_RUN_THRESHOLD_SEC = 30 * 60
+
+
+def _check_long_run(result: dict) -> tuple:
+    """检测任务是否长跑（中性提示，**不**断言卡死）。返回 (is_long, elapsed_sec)。"""
+    status = result.get("status", "")
+    cat = result.get("created_at", 0)
+    uat = result.get("updated_at", 0)
+    if status not in ("running", "pending"):
+        return False, 0
+    now = int(time.time())
+    elapsed = now - cat
+    # 长跑判定：running + uat 没刷过（API 设计如此）+ 超阈值
+    if uat <= cat and elapsed > LONG_RUN_THRESHOLD_SEC:
+        return True, elapsed
+    return False, 0
+
+
 def cmd_status(args):
-    """查询任务状态"""
+    """查询任务状态（含长跑 hint · 不判卡死）"""
     try:
         result = U.ark_request("GET", f"{BASE_URL}/{args.task_id}")
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
+
+    # 长跑提示（中性 — 仅提示时长异常，建议用 list 对比相邻任务）
+    is_long, elapsed = _check_long_run(result)
+    if is_long:
+        mins = elapsed // 60
+        cat = result.get("created_at", 0)
+        uat = result.get("updated_at", 0)
+        print(
+            f"💡 LONG-RUNNING: 任务 {args.task_id} status={result.get('status')} "
+            f"已 {mins} 分钟（updated_at {uat} == created_at {cat} · API 设计如此，"
+            f"不是卡死信号）",
+            file=sys.stderr,
+        )
+        print(
+            "   历史实战参考（2026-06-10 Pic8 Rabbit Clip4 qg6cg）：复杂 prompt 可达 19+ 分钟，"
+            "正常。",
+            file=sys.stderr,
+        )
+        print(
+            "   建议判读（铁律：不要看 updated_at）：",
+            file=sys.stderr,
+        )
+        print(
+            "   1) `seedance.py list --page-size 10` 看相邻任务状态分布（同批次其他 succeeded = 平台 OK）",
+            file=sys.stderr,
+        )
+        print(
+            "   2) 同批次都 succeeded 仅本任务长跑 → 可能 prompt 复杂 / 资源调度，"
+            "**不**要重提交（已扣费）",
+            file=sys.stderr,
+        )
+        print(
+            "   3) 整批都卡 queued → 检查 ARK_API_KEY 配额 / 模型 availability",
+            file=sys.stderr,
+        )
+
     print(json.dumps(result, indent=2, ensure_ascii=False))
     # 写缓存
     U.cache_task(
@@ -164,6 +224,66 @@ def cmd_status(args):
         duration=result.get("duration"), ratio=result.get("ratio"),
         resolution=result.get("resolution"),
     )
+
+
+def cmd_list(args):
+    """列出最近 N 条任务（含长跑标记 · 不判卡死）"""
+    try:
+        # ⚠️ 官方 list 端点参数是 page_size（不是 limit）—— 与 mcp_server.py verify_api_key 一致
+        result = U.ark_request("GET", f"{BASE_URL}?page_size={args.page_size}")
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    items = result.get("items") or []
+    total = result.get("total", len(items))
+    if not items:
+        print(f"(无任务 — total={total})")
+        return
+
+    now = int(time.time())
+    # 表头
+    print(f"任务列表（共 {total} 条，展示最近 {len(items)} 条 · {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')})")
+    print()
+    header = f"{'STATUS':10} {'STALLED':7} {'DURATION':8} {'RATIO':6} {'RES':5} {'ELAPSED':>10}  {'TASK_ID':24}  {'CREATED (CST)':20}"
+    print(header)
+    print("-" * len(header))
+
+    # 按 created_at 倒序
+    items = sorted(items, key=lambda x: x.get("created_at", 0), reverse=True)
+    for t in items:
+        st = t.get("status", "?")
+        dur = t.get("duration", "?")
+        ratio = t.get("ratio", "?")
+        res = t.get("resolution", "?")
+        tid = t.get("id", "?")
+        cat = t.get("created_at", 0)
+        uat = t.get("updated_at", 0)
+        elapsed = (now - cat) if cat else 0
+        mins = elapsed // 60
+        secs = elapsed % 60
+        elapsed_str = f"{mins}m{secs:02d}s"
+
+        # 长跑标记：running/pending + uat <= cat + elapsed > 阈值
+        if st in ("running", "pending") and uat <= cat and elapsed > LONG_RUN_THRESHOLD_SEC:
+            stalled = f"💡 {elapsed // 60}m"
+        elif st in ("running", "pending") and uat <= cat:
+            stalled = f"💡 init"  # 刚提交还没刷新，正常
+        else:
+            stalled = "-"
+
+        # CST 时间
+        cst_str = datetime.datetime.fromtimestamp(cat).strftime("%m-%d %H:%M:%S") if cat else "?"
+
+        print(f"{st:10} {stalled:7} {str(dur):8} {ratio:6} {res:5} {elapsed_str:>10}  {tid:24}  {cst_str:20}")
+
+    # 总览统计
+    by_status = {}
+    for t in items:
+        s = t.get("status", "?")
+        by_status[s] = by_status.get(s, 0) + 1
+    print()
+    print("状态分布: " + " | ".join(f"{k}={v}" for k, v in sorted(by_status.items())))
 
 
 def cmd_wait(args):
@@ -266,9 +386,13 @@ Environment variables:
     create_parser.add_argument("--download", help="下载到的本地路径")
     create_parser.set_defaults(func=cmd_create)
 
-    status_parser = subparsers.add_parser("status", help="查询任务状态")
+    status_parser = subparsers.add_parser("status", help="查询任务状态（含长跑 hint）")
     status_parser.add_argument("task_id", help="任务ID")
     status_parser.set_defaults(func=cmd_status)
+
+    list_parser = subparsers.add_parser("list", help="列出最近 N 条任务（含长跑标记）")
+    list_parser.add_argument("--page-size", type=int, default=10, help="返回任务数（默认 10，最大 100）")
+    list_parser.set_defaults(func=cmd_list)
 
     wait_parser = subparsers.add_parser("wait", help="等待任务完成")
     wait_parser.add_argument("task_id", help="任务ID")
